@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 from pathlib import Path
 import time
@@ -109,7 +110,7 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def handle_longform_youtube_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         video_link = update.message.text
-        video_formats = get_youtube_download_info(video_link)
+        video_formats = await asyncio.to_thread(get_youtube_download_info, video_link)
         user = update.effective_user
         file_name = f"{uuid.uuid4()}_{user.id}"
         # {file_name} {video_link} 
@@ -156,7 +157,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         fileName = f"{uuid.uuid4()}_{user.id}"
 
         # if(update.message.text
-        downloadedFile = download(update.message.text,fileName)
+        downloadedFile = await asyncio.to_thread(download, update.message.text, fileName)
         # update.message.text
         # await update.message.reply_text(update.effective_user)
         # want to know the downloaded file fomrat so i can unlink it after sending it to the user
@@ -190,7 +191,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if 'cache' in context.user_data:
             url = context.user_data['cache'][user.id]['url']
             outtmpl = context.user_data['cache'][user.id]['outtmpl']
-            downloaded_file = youtube_download(url=url,outtmpl=outtmpl,format=format)
+            downloaded_file = await asyncio.to_thread(youtube_download,url=url,outtmpl=outtmpl,format=format)
+            
             try:
                 # with open(downloaded_file, 'rb') as video_file:
                 if not format.startswith('bestaudio'):
