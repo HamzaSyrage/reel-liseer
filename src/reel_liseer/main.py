@@ -165,6 +165,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     format = query.data
     await query.delete_message()
     
+    if 'cache' not in context.user_data or user.id not in context.user_data['cache']:
+        await context.bot.send_message(chat_id=query.message.chat_id, text="Button expired (bot restarted). Please send the link again.")
+        return
     if 'cache' in context.user_data:
         url = context.user_data['cache'][user.id]['url']
         outtmpl = context.user_data['cache'][user.id]['outtmpl']
@@ -194,8 +197,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 #   elif query.data == "help_menu":
 #     await query.edit_message_text(text="Here is the help menu...")
 
-def main() -> None:
-    """Start the bot."""
+def build_application() -> Application:
+    """Build the bot application with all handlers. Same for polling and webhook."""
     # Create the Application and pass it your bot's token.
     application = Application.builder().token(TOKEN).build()
 
@@ -203,15 +206,26 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("ping", ping_command))
     # application.add_handler(CommandHandler("help", help_command))
-    
+
     # on non command i.e message - echo the message on Telegram
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
 
 
     application.add_handler(CallbackQueryHandler(handle_callback))
-    
-    # Run the bot until the user presses Ctrl-C
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    return application
+
+
+def main() -> None:
+    mode = os.getenv("BOT_MODE", "polling").lower().strip()
+
+    if mode == "webhook":
+        import uvicorn
+
+        port = int(os.getenv("PORT", "8000"))
+        uvicorn.run("reel_liseer.webapp:app", host="0.0.0.0", port=port)
+    else:
+        build_application().run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
