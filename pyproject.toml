@@ -8,7 +8,8 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
-    "fastapi>=0.141.1",
+    "fastapi[standard]>=0.141.1",
+    "imageio-ffmpeg>=0.6.0",
     "python-dotenv>=1.2.3",
     "python-telegram-bot>=22.8",
     "uvicorn>=0.53.0",
@@ -17,6 +18,9 @@ dependencies = [
 
 [project.scripts]
 reel-liseer = "reel_liseer:main"
+
+[tool.fastapi]
+entrypoint = "src.reel_liseer.webapp:app"
 
 [build-system]
 requires = ["uv_build>=0.12.13,<0.13.0"]

@@ -18,12 +18,12 @@ def is_valid_link(text):
     return isinstance(text, str) and bool(re.match(URL_REGEX, text, re.IGNORECASE))
 
 SOCIAL_REGEX = (
-    r"^https?://(?:[a-z0-9-]+\.)?(?:"                         
-    r"youtube\.com(?:/watch\?v=|/embed/|/shorts/|/)|youtu\.be/|" 
-    r"facebook\.com/|"                                         
-    r"instagram\.com/|"                                        
-    r"tiktok\.com/(?:@[\w.-]+/video/|@[\w.-]+/|)|"             
-    r"twitter\.com/|x\.com/"                                 
+    r"^https?://(?:[a-z0-9-]+\.)?(?:"
+    r"youtube\.com(?:/watch\?v=|/embed/|/shorts/|/)|youtu\.be/|"
+    r"facebook\.com/|"
+    r"instagram\.com/|"
+    r"tiktok\.com/(?:@[\w.-]+/video/|@[\w.-]+/|)|"
+    r"twitter\.com/|x\.com/"
     r")([\w.-]+)"
 )
 
@@ -31,7 +31,7 @@ def is_accepted_social_link(text):
     return isinstance(text, str) and bool(re.match(SOCIAL_REGEX, text, re.IGNORECASE))
 
 LONGFORM_YOUTUBE_REGEX = (
-    r"^https?://(?:[a-z0-9-]+\.)?(?:"                         
+    r"^https?://(?:[a-z0-9-]+\.)?(?:"
     r"youtube\.com(?:/watch\?v=|/embed/|/v/|/|)|youtu\.be/"
     r")([\w.-]+)"
 )
@@ -71,23 +71,29 @@ logger = logging.getLogger(__name__)
 # context.
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
-    user = update.effective_user
-    await update.message.reply_html(
-        rf"Hi {user.mention_html()}!",
-        # reply_markup=ForceReply(selective=True),
-    )
+    try:
+        user = update.effective_user
+        await update.message.reply_html(
+            rf"Hi {user.mention_html()}!",
+            # reply_markup=ForceReply(selective=True),
+        )
+    except Exception:
+        logger.exception("Error in start handler")
 
 
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    start_time = time.time()
-    await update.message.reply_text("Pong!")
-    end_time = time.time()
-    elapsed_time_ms = (end_time - start_time) * 1000
-    await update.message.reply_text(f"Response time: {elapsed_time_ms:.2f} ms")
-    
+    try:
+        start_time = time.time()
+        await update.message.reply_text("Pong!")
+        end_time = time.time()
+        elapsed_time_ms = (end_time - start_time) * 1000
+        await update.message.reply_text(f"Response time: {elapsed_time_ms:.2f} ms")
+    except Exception:
+        logger.exception("Error in ping handler")
+
 
 # async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-#     """Send a message when the command /help is issued."""
+#     """Send a message when the /help command is issued."""
 #     keyboard = [
 #       [
 #           InlineKeyboardButton("Confirm", callback_data="confirm_yes"),
@@ -101,101 +107,130 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 #     await update.message.reply_text("Help!",reply_markup=reply_markup)
 
 async def handle_longform_youtube_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    video_link = update.message.text
-    video_formats =get_youtube_download_info(video_link)
-    user =update.effective_user
-    file_name = f"{uuid.uuid4()}_{user.id}"
-    # {file_name} {video_link} 
-    if 'cache' not in context.user_data:
-        context.user_data['cache']={}
-    
-    context.user_data['cache'][user.id]={"outtmpl":file_name,"url":video_link}
-    
-    keyboard_markup = [
-    [
-        InlineKeyboardButton("Best Audio", callback_data="bestaudio[ext=m4a]/bestaudio"),
-        InlineKeyboardButton("Best Video", callback_data="bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4"),
-    ],
-    *[
-        [
-            InlineKeyboardButton(
-                text=f"{f['format']} {f['ext']} - {f['file_size']}", 
-                callback_data=f['format_id']
-            )
-        ] 
-        for f in video_formats
-    ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard_markup)
+    try:
+        video_link = update.message.text
+        video_formats = get_youtube_download_info(video_link)
+        user = update.effective_user
+        file_name = f"{uuid.uuid4()}_{user.id}"
+        # {file_name} {video_link} 
+        if 'cache' not in context.user_data:
+            context.user_data['cache']={}
         
-    await update.message.reply_text(text='select',reply_markup=reply_markup)
+        context.user_data['cache'][user.id]={"outtmpl":file_name,"url":video_link}
+        
+        keyboard_markup = [
+        [
+            InlineKeyboardButton("Best Audio", callback_data="bestaudio[ext=m4a]/bestaudio"),
+            InlineKeyboardButton("Best Video", callback_data="bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4"),
+        ],
+        *[
+            [
+                InlineKeyboardButton(
+                    text=f"{f['format']} {f['ext']} - {f['file_size']}", 
+                    callback_data=f['format_id']
+                )
+            ] 
+            for f in video_formats
+        ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard_markup)
+            
+        await update.message.reply_text(text='select',reply_markup=reply_markup)
+    except Exception:
+        logger.exception("Error handling YouTube link")
+        # await update.message.reply_text("Something went wrong while processing the YouTube link.")
 
 
 async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    userMessage = update.message.text
-    if not is_valid_link(userMessage):
-        return
-    if not is_accepted_social_link(userMessage):
-        return
-    # i want this to work for only non youtube short videos
-    if is_a_longform_youtube_link(userMessage):
-        await handle_longform_youtube_link(update, context)
-        return
-    user =update.effective_user
-    fileName = f"{uuid.uuid4()}_{user.id}"
+    try:
+        userMessage = update.message.text
+        if not is_valid_link(userMessage):
+            return
+        if not is_accepted_social_link(userMessage):
+            return
+        # i want this to work for only non youtube short videos
+        if is_a_longform_youtube_link(userMessage):
+            await handle_longform_youtube_link(update, context)
+            return
+        user = update.effective_user
+        fileName = f"{uuid.uuid4()}_{user.id}"
 
-    # if(update.message.text
-    downloadedFile=download(update.message.text,fileName)
-    # update.message.text
-    # await update.message.reply_text(update.effective_user)
-    # want to know the downloaded file fomrat so i can unlink it after sending it to the user
-    # The file format will be determined by the downloader
+        # if(update.message.text
+        downloadedFile = download(update.message.text,fileName)
+        # update.message.text
+        # await update.message.reply_text(update.effective_user)
+        # want to know the downloaded file fomrat so i can unlink it after sending it to the user
+        # The file format will be determined by the downloader
 
-    await update.message.reply_video(downloadedFile)
-    Path(downloadedFile).unlink()
-    # .reply_text(update.effective_user)
+        try:
+            await update.message.reply_video(downloadedFile)
+        finally:
+            if Path(downloadedFile).exists():
+                Path(downloadedFile).unlink()
+        # .reply_text(update.effective_user)
+    except Exception:
+        logger.exception("Error handling message")
+        # await update.message.reply_text("Something went wrong while processing your link.")
+
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
-    # 1. Acknowledge the button click immediately (stops the loading spinner)
-    await query.answer()
-    # await query.edit_message_text('downloading...')
-    user = query.from_user
-    format = query.data
-    await query.delete_message()
-    
-    if 'cache' not in context.user_data or user.id not in context.user_data['cache']:
-        await context.bot.send_message(chat_id=query.message.chat_id, text="Button expired (bot restarted). Please send the link again.")
-        return
-    if 'cache' in context.user_data:
-        url = context.user_data['cache'][user.id]['url']
-        outtmpl = context.user_data['cache'][user.id]['outtmpl']
-        downloaded_file=youtube_download(url=url,outtmpl=outtmpl,format=format)
-        # with open(downloaded_file, 'rb') as video_file:
-        if not format.startswith('bestaudio'):
-            print(f"Sending video: {downloaded_file}")
-            with open(downloaded_file, "rb") as video_file:
-                await context.bot.send_video(
-                    chat_id=query.message.chat_id,
-                    video=video_file
-                )      
-        else:
-            print(f"Sending audio: {downloaded_file}")
-            with open(downloaded_file, "rb") as audio_file:
-                await context.bot.send_audio(
-                    chat_id=query.message.chat_id,
-                    audio=audio_file
-                )
-                
-        Path(downloaded_file).unlink()
-    
-    # 2. Check which button was clicked using callback_data
-#   if query.data == "confirm_yes":
-#   elif query.data == "confirm_no":
-#     await query.edit_message_text(text="Action cancelled.")
-#   elif query.data == "help_menu":
-#     await query.edit_message_text(text="Here is the help menu...")
+    try:
+        # 1. Acknowledge the button click immediately (stops the loading spinner)
+        await query.answer()
+        # await query.edit_message_text('downloading...')
+        user = query.from_user
+        format = query.data
+        await query.delete_message()
+        
+        if 'cache' not in context.user_data or user.id not in context.user_data['cache']:
+            await context.bot.send_message(chat_id=query.message.chat_id, text="Button expired (bot restarted). Please send the link again.")
+            return
+        if 'cache' in context.user_data:
+            url = context.user_data['cache'][user.id]['url']
+            outtmpl = context.user_data['cache'][user.id]['outtmpl']
+            downloaded_file = youtube_download(url=url,outtmpl=outtmpl,format=format)
+            try:
+                # with open(downloaded_file, 'rb') as video_file:
+                if not format.startswith('bestaudio'):
+                    print(f"Sending video: {downloaded_file}")
+                    with open(downloaded_file, "rb") as video_file:
+                        await context.bot.send_video(
+                            chat_id=query.message.chat_id,
+                            video=video_file
+                        )      
+                else:
+                    print(f"Sending audio: {downloaded_file}")
+                    with open(downloaded_file, "rb") as audio_file:
+                        await context.bot.send_audio(
+                            chat_id=query.message.chat_id,
+                            audio=audio_file
+                        )
+            finally:
+                if Path(downloaded_file).exists():
+                    Path(downloaded_file).unlink()
+        
+        # 2. Check which button was clicked using callback_data
+    #   if query.data == "confirm_yes":
+    #   elif query.data == "confirm_no":
+    #     await query.edit_message_text(text="Action cancelled.")
+    #   elif query.data == "help_menu":
+    #     await query.edit_message_text(text="Here is the help menu...")
+    except Exception:
+        logger.exception("Error handling callback")
+        try:
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                # text="Something went wrong while downloading the file."
+            )
+        except Exception:
+            logger.exception("Could not send callback error message")
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.exception("Unhandled exception", exc_info=context.error)
+
 
 def build_application() -> Application:
     """Build the bot application with all handlers. Same for polling and webhook."""
@@ -210,8 +245,8 @@ def build_application() -> Application:
     # on non command i.e message - echo the message on Telegram
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
 
-
     application.add_handler(CallbackQueryHandler(handle_callback))
+    application.add_error_handler(error_handler)
 
     return application
 

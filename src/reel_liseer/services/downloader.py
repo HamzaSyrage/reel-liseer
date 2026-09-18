@@ -1,10 +1,27 @@
 import json
+import os
 import yt_dlp
 from reel_liseer import config
+import imageio_ffmpeg
+
+ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+
 ydl_opts = {}
 ydl_opts['paths'] = {'home': config.DOWLOAD_PATH}
 ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4/bestvideo+bestaudio/best/bestvideo+bestaudio'
 # ydl_opts['outtmpl'] = "tessssst"
+
+ydl_opts['extractor_args'] = {
+    'youtube': {
+        'player_client': ['tv']
+    }
+}
+ydl_opts["ffmpeg_location"] = ffmpeg_path
+
+ydl_opts['cookiefile'] = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    'youtube-cookies.txt'
+)
 
 def download(url,outtmpl):
     l_ydl_opts= ydl_opts.copy()
@@ -28,8 +45,9 @@ def format_size(b: int) -> str:
     return f"{b:.2f} {u}" if i else f"{orig} Bytes"
 
 def get_youtube_download_info(url):
-    
-    with yt_dlp.YoutubeDL({}) as ydl:
+    l_ydl_opts = ydl_opts.copy()
+    l_ydl_opts.pop('format', None)  
+    with yt_dlp.YoutubeDL(l_ydl_opts) as ydl:
         meta = ydl.extract_info(
             url, download=False) 
         formats = meta.get('formats', [meta])
