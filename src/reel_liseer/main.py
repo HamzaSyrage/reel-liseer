@@ -105,6 +105,11 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "format": "best[ext=mp4]/best",
             "outtmpl": f"{output_path}.%(ext)s",
             "verbose": True,
+            "extractor_args" : {
+                'youtube': {
+                    'player_client': ['default', 'web_embedded']
+                    }
+            }
         }
 
         def run_download():

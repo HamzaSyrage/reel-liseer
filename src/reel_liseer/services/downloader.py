@@ -26,7 +26,11 @@ ydl_opts['cookiefile'] = "/app/src/youtube-cookies.txt"
 print("COOKIE FILE:", ydl_opts["cookiefile"])
 print("COOKIE EXISTS:", os.path.exists(ydl_opts["cookiefile"]))
 print("COOKIE SIZE:", os.path.getsize(ydl_opts["cookiefile"]) if os.path.exists(ydl_opts["cookiefile"]) else None)
-
+ydl_opts['extractor_args'] = {
+    'youtube': {
+        'player_client': ['default', 'web_embedded']
+    }
+}
 def printing():
     return os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
