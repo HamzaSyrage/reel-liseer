@@ -4,7 +4,9 @@ from pathlib import Path
 import time
 import uuid
 
-from reel_liseer.services.downloader import download, get_youtube_download_info, youtube_download
+import yt_dlp
+
+from reel_liseer.services.downloader import download, get_youtube_download_info, printing, youtube_download
 from reel_liseer.config import DOWLOAD_PATH
 import os
 from dotenv import load_dotenv
@@ -92,6 +94,39 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception:
         logger.exception("Error in ping handler")
 
+async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        await update.message.reply_text("Starting YouTube test...")
+
+        output_path = "/app/src/reel_liseer/.downloaded-media/test-youtube"
+
+        ydl_opts = {
+            "cookiefile": "/app/src/youtube-cookies.txt",
+            "format": "best[ext=mp4]/best",
+            "outtmpl": f"{output_path}.%(ext)s",
+            "verbose": True,
+        }
+
+        def run_download():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(
+                    "https://www.youtube.com/watch?v=DogH-RgansQ",
+                    download=False
+                    # download=True,
+                )
+                return ydl.prepare_filename(info)
+
+        downloaded_file = await asyncio.to_thread(run_download)
+
+        await update.message.reply_text(
+            f"Download succeeded:\n{downloaded_file}"
+        )
+
+    except Exception as e:
+        logger.exception("YouTube test failed")
+        await update.message.reply_text(
+            f"YouTube test failed:\n{type(e).__name__}: {e}"
+        )
 
 # async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 #     """Send a message when the /help command is issued."""
@@ -241,6 +276,7 @@ def build_application() -> Application:
 
     # on different commands - answer in Telegram
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("test", test_command))
     application.add_handler(CommandHandler("ping", ping_command))
     # application.add_handler(CommandHandler("help", help_command))
 

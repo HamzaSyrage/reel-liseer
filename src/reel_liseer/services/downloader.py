@@ -11,17 +11,30 @@ ydl_opts['paths'] = {'home': config.DOWLOAD_PATH}
 ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4/bestvideo+bestaudio/best/bestvideo+bestaudio'
 # ydl_opts['outtmpl'] = "tessssst"
 
-ydl_opts['extractor_args'] = {
-    'youtube': {
-        'player_client': ['tv']
-    }
-}
+# ydl_opts['extractor_args'] = {
+#     'youtube': {
+#         'player_client': ['tv']
+#     }
+# }
 ydl_opts["ffmpeg_location"] = ffmpeg_path
 
-ydl_opts['cookiefile'] = os.path.join(
+# ydl_opts['cookiefile'] = os.path.join(
+#     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+#     'youtube-cookies.txt'
+# )
+ydl_opts['cookiefile'] = "/app/src/youtube-cookies.txt"
+print("COOKIE FILE:", ydl_opts["cookiefile"])
+print("COOKIE EXISTS:", os.path.exists(ydl_opts["cookiefile"]))
+print("COOKIE SIZE:", os.path.getsize(ydl_opts["cookiefile"]) if os.path.exists(ydl_opts["cookiefile"]) else None)
+
+def printing():
+    return os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     'youtube-cookies.txt'
 )
+
+# TEMP
+ydl_opts["verbose"] = True
 
 def download(url,outtmpl):
     l_ydl_opts= ydl_opts.copy()

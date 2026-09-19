@@ -1,13 +1,19 @@
+import logging
 import os
+import signal
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse
 from telegram import Update
 
 from reel_liseer.main import build_application
+from reel_liseer.services.downloader import printing
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").rstrip("/")
 WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "telegram").strip().strip("/")
@@ -15,26 +21,55 @@ WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "telegram").strip().strip("/")
 ptb_app = build_application()
 
 
+def handle_shutdown_signal(signum, frame):
+    logger.warning(
+        "RECEIVED SHUTDOWN SIGNAL: %s",
+        signal.Signals(signum).name,
+    )
+
+
+signal.signal(signal.SIGTERM, handle_shutdown_signal)
+signal.signal(signal.SIGINT, handle_shutdown_signal)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # start the bot
-    await ptb_app.initialize()
-    await ptb_app.start()
+    logger.info("Starting application")
 
-    # register webhook with telegram (needs public HTTPS url)
-    if WEBHOOK_URL:
-        url = f"{WEBHOOK_URL}/{WEBHOOK_PATH}"
-        await ptb_app.bot.set_webhook(url=url, allowed_updates=Update.ALL_TYPES)
-
-    yield
-
-    # cleanup on shutdown
     try:
-        await ptb_app.bot.delete_webhook()
-    except Exception:
-        pass
-    await ptb_app.stop()
-    await ptb_app.shutdown()
+        await ptb_app.initialize()
+        await ptb_app.start()
+
+        if WEBHOOK_URL:
+            url = f"{WEBHOOK_URL}/{WEBHOOK_PATH}"
+            await ptb_app.bot.set_webhook(
+                url=url,
+                allowed_updates=Update.ALL_TYPES,
+            )
+
+        logger.info("Application started")
+
+        yield
+
+    finally:
+        logger.info("Application shutdown started")
+
+        try:
+            await ptb_app.bot.delete_webhook()
+        except Exception:
+            logger.exception("Failed to delete webhook")
+
+        try:
+            await ptb_app.stop()
+        except Exception:
+            logger.exception("Failed to stop Telegram application")
+
+        try:
+            await ptb_app.shutdown()
+        except Exception:
+            logger.exception("Failed to shutdown Telegram application")
+
+        logger.info("Application shutdown completed")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -56,3 +91,32 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/youtube-cookies.txt")
+def get_youtube_cookies():
+    cookie_file_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "youtube-cookies.txt",
+    )
+    return FileResponse(
+        path=cookie_file_path,
+        media_type="text/plain",
+    )
+
+
+@app.get("/txt")
+def get_txt_cookies():
+    cookie_file_path = "/app/src/youtube-cookies.txt"
+    return FileResponse(
+        path=cookie_file_path,
+        media_type="text/plain",
+    )
+
+
+@app.get("/printing")
+def get_printing():
+    return {
+        "status": "ok",
+        "path": printing(),
+    }
