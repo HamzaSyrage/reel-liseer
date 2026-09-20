@@ -38,7 +38,7 @@ def is_valid_link(text):
 
 SOCIAL_REGEX = (
     r"^https?://(?:[a-z0-9-]+\.)?(?:"
-    #! youtube not accepted any more, sorry
+    #! youtube are not accepted any more, sorry
     # r"youtube\.com(?:/watch\?v=|/embed/|/shorts/|/)|youtu\.be/|"
     r"facebook\.com/|"
     r"instagram\.com/|"
@@ -103,11 +103,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        start_time = time.time()
+        # start_time = time.time()
         # await update.message.reply_text("")
-        end_time = time.time()
-        elapsed_time_ms = (end_time - start_time) * 1000
-        await update.message.reply_text(f"Pong! {elapsed_time_ms:.2f} ms")
+        # end_time = time.time()
+        # elapsed_time_ms = (end_time - start_time) * 1000
+        # await update.message.reply_text(f"Pong! {elapsed_time_ms:.2f} ms")
+        await update.message.reply_text(f"Pong!")
     except Exception:
         logger.exception("Error in ping handler")
 
