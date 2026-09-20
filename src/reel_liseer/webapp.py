@@ -9,7 +9,6 @@ from fastapi.responses import FileResponse
 from telegram import Update
 
 from reel_liseer.main import build_application
-from reel_liseer.services.downloader import printing
 
 load_dotenv()
 
@@ -93,30 +92,30 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/youtube-cookies.txt")
-def get_youtube_cookies():
-    cookie_file_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "youtube-cookies.txt",
-    )
-    return FileResponse(
-        path=cookie_file_path,
-        media_type="text/plain",
-    )
+# @app.get("/youtube-cookies.txt")
+# def get_youtube_cookies():
+#     cookie_file_path = os.path.join(
+#         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+#         "youtube-cookies.txt",
+#     )
+#     return FileResponse(
+#         path=cookie_file_path,
+#         media_type="text/plain",
+#     )
 
 
-@app.get("/txt")
-def get_txt_cookies():
-    cookie_file_path = "/app/src/youtube-cookies.txt"
-    return FileResponse(
-        path=cookie_file_path,
-        media_type="text/plain",
-    )
+# @app.get("/txt")
+# def get_txt_cookies():
+#     cookie_file_path = "/app/src/youtube-cookies.txt"
+#     return FileResponse(
+#         path=cookie_file_path,
+#         media_type="text/plain",
+#     )
 
 
-@app.get("/printing")
-def get_printing():
-    return {
-        "status": "ok",
-        "path": printing(),
-    }
+# @app.get("/printing")
+# def get_printing():
+#     return {
+#         "status": "ok",
+#         "path": printing(),
+#     }

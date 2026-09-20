@@ -4,10 +4,10 @@ from pathlib import Path
 import time
 import uuid
 
-import yt_dlp
+# import yt_dlp
 
-from reel_liseer.services.downloader import download, get_youtube_download_info, printing, youtube_download
-from reel_liseer.config import DOWLOAD_PATH
+from reel_liseer.services.downloader import download, get_youtube_download_info, youtube_download
+# from reel_liseer.config import DOWLOAD_PATH
 import os
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -17,12 +17,27 @@ import re
 
 URL_REGEX = r"^https?://(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{2,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*)$"
 
+URL_PATTERN = r'https?://[^\s<>"]+|www\.[^\s<>"]+'
+
+
+def message_has_link(message):
+    if not message:
+        return False
+    return bool(re.search(URL_PATTERN, message, re.IGNORECASE))
+
+def extract_link_from_message(message):
+    if not message or not message.text:
+        return None
+    match = re.findall(URL_PATTERN, message.text, re.IGNORECASE)
+    return match[0] if match else None
+
 def is_valid_link(text): 
     return isinstance(text, str) and bool(re.match(URL_REGEX, text, re.IGNORECASE))
 
 SOCIAL_REGEX = (
     r"^https?://(?:[a-z0-9-]+\.)?(?:"
-    r"youtube\.com(?:/watch\?v=|/embed/|/shorts/|/)|youtu\.be/|"
+    #! youtube not accepted any more, sorry
+    # r"youtube\.com(?:/watch\?v=|/embed/|/shorts/|/)|youtu\.be/|"
     r"facebook\.com/|"
     r"instagram\.com/|"
     r"tiktok\.com/(?:@[\w.-]+/video/|@[\w.-]+/|)|"
@@ -87,51 +102,51 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         start_time = time.time()
-        await update.message.reply_text("Pong!")
+        # await update.message.reply_text("")
         end_time = time.time()
         elapsed_time_ms = (end_time - start_time) * 1000
-        await update.message.reply_text(f"Response time: {elapsed_time_ms:.2f} ms")
+        await update.message.reply_text(f"Pong! {elapsed_time_ms:.2f} ms")
     except Exception:
         logger.exception("Error in ping handler")
 
-async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    try:
-        await update.message.reply_text("Starting YouTube test...")
+# async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+#     try:
+#         await update.message.reply_text("Starting YouTube test...")
 
-        output_path = "/app/src/reel_liseer/.downloaded-media/test-youtube"
+#         output_path = "/app/src/reel_liseer/.downloaded-media/test-youtube"
 
-        ydl_opts = {
-            "cookiefile": "/app/src/youtube-cookies.txt",
-            "format": "best[ext=mp4]/best",
-            "outtmpl": f"{output_path}.%(ext)s",
-            "verbose": True,
-            "extractor_args" : {
-                'youtube': {
-                    'player_client': ['default', 'web_embedded']
-                    }
-            }
-        }
+#         ydl_opts = {
+#             "cookiefile": "/app/src/youtube-cookies.txt",
+#             "format": "best[ext=mp4]/best",
+#             "outtmpl": f"{output_path}.%(ext)s",
+#             "verbose": True,
+#             "extractor_args" : {
+#                 'youtube': {
+#                     'player_client': ['default', 'web_embedded']
+#                     }
+#             }
+#         }
 
-        def run_download():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(
-                    "https://www.youtube.com/watch?v=DogH-RgansQ",
-                    download=False
-                    # download=True,
-                )
-                return ydl.prepare_filename(info)
+#         def run_download():
+#             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+#                 info = ydl.extract_info(
+#                     "https://www.youtube.com/watch?v=DogH-RgansQ",
+#                     download=False
+#                     # download=True,
+#                 )
+#                 return ydl.prepare_filename(info)
 
-        downloaded_file = await asyncio.to_thread(run_download)
+#         downloaded_file = await asyncio.to_thread(run_download)
 
-        await update.message.reply_text(
-            f"Download succeeded:\n{downloaded_file}"
-        )
+#         await update.message.reply_text(
+#             f"Download succeeded:\n{downloaded_file}"
+#         )
 
-    except Exception as e:
-        logger.exception("YouTube test failed")
-        await update.message.reply_text(
-            f"YouTube test failed:\n{type(e).__name__}: {e}"
-        )
+#     except Exception as e:
+#         logger.exception("YouTube test failed")
+#         await update.message.reply_text(
+#             f"YouTube test failed:\n{type(e).__name__}: {e}"
+#         )
 
 # async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 #     """Send a message when the /help command is issued."""
@@ -185,7 +200,8 @@ async def handle_longform_youtube_link(update: Update, context: ContextTypes.DEF
 async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         userMessage = update.message.text
-        if not is_valid_link(userMessage):
+        if not message_has_link(userMessage):
+            print("no link found")
             return
         if not is_accepted_social_link(userMessage):
             return
@@ -194,10 +210,12 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await handle_longform_youtube_link(update, context)
             return
         user = update.effective_user
+        link_from_message = extract_link_from_message(update.message)
+
         fileName = f"{uuid.uuid4()}_{user.id}"
 
         # if(update.message.text
-        downloadedFile = await asyncio.to_thread(download, update.message.text, fileName)
+        downloadedFile = await asyncio.to_thread(download,link_from_message , fileName)
         # update.message.text
         # await update.message.reply_text(update.effective_user)
         # want to know the downloaded file fomrat so i can unlink it after sending it to the user
@@ -281,7 +299,7 @@ def build_application() -> Application:
 
     # on different commands - answer in Telegram
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("test", test_command))
+    # application.add_handler(CommandHandler("test", test_command))
     application.add_handler(CommandHandler("ping", ping_command))
     # application.add_handler(CommandHandler("help", help_command))
 
