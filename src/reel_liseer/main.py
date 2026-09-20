@@ -1,8 +1,10 @@
 import asyncio
+import sys
 from datetime import datetime
 from pathlib import Path
 import time
 import uuid
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # import yt_dlp
 
@@ -317,8 +319,11 @@ def main() -> None:
         import uvicorn
 
         port = int(os.getenv("PORT", "8000"))
-        uvicorn.run("reel_liseer.webapp:app", host="0.0.0.0", port=port)
+        logger.info("Starting in webhook mode on port %s", port)
+        from reel_liseer.webapp import app as fastapi_app
+        uvicorn.run(fastapi_app, host="0.0.0.0", port=port)
     else:
+        logger.info("Starting in polling mode")
         build_application().run_polling(allowed_updates=Update.ALL_TYPES)
 
 

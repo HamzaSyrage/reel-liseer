@@ -1,6 +1,5 @@
 import logging
 import os
-import signal
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -18,18 +17,6 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").rstrip("/")
 WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "telegram").strip().strip("/")
 
 ptb_app = build_application()
-
-
-def handle_shutdown_signal(signum, frame):
-    logger.warning(
-        "RECEIVED SHUTDOWN SIGNAL: %s",
-        signal.Signals(signum).name,
-    )
-
-
-signal.signal(signal.SIGTERM, handle_shutdown_signal)
-signal.signal(signal.SIGINT, handle_shutdown_signal)
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
