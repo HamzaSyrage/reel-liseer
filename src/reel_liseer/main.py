@@ -201,16 +201,14 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     try:
         userMessage = update.message.text
         if not message_has_link(userMessage):
-            print("no link found")
             return
-        if not is_accepted_social_link(userMessage):
-            return
-        # i want this to work for only non youtube short videos
-        if is_a_longform_youtube_link(userMessage):
+        link_from_message = extract_link_from_message(update.message)
+        if not is_accepted_social_link(link_from_message):
+            return 
+        if is_a_longform_youtube_link(link_from_message):
             await handle_longform_youtube_link(update, context)
             return
         user = update.effective_user
-        link_from_message = extract_link_from_message(update.message)
 
         fileName = f"{uuid.uuid4()}_{user.id}"
 
