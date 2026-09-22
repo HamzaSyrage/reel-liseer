@@ -56,9 +56,25 @@ async def lifespan(app: FastAPI):
     #         logger.exception("Failed to shutdown Telegram application")
 
     #     logger.info("Application shutdown completed")
-    except Exception:
-        logger.exception("Application failed to start")
-        raise
+    
+    finally:
+        logger.info("Application shutdown started")
+
+        try:
+            await ptb_app.stop()
+        except Exception:
+            logger.exception("Failed to stop Telegram application")
+
+        try:
+            await ptb_app.shutdown()
+        except Exception:
+            logger.exception("Failed to shutdown Telegram application")
+
+        logger.info("Application shutdown completed")
+    
+    # except Exception:
+    #     logger.exception("Application failed to start")
+    #     raise
 
 app = FastAPI(lifespan=lifespan)
 
