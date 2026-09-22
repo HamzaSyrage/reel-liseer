@@ -1,6 +1,6 @@
 import asyncio
 import sys
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -16,7 +16,7 @@ URL_PATTERN = r'https?://[^\s<>"]+|www\.[^\s<>"]+'
 SOCIAL_REGEX = (
     r"^https?://(?:[a-z0-9-]+\.)?(?:"
     # ! Sorry
-    # r"youtube\.com(?:/watch\?v=|/embed/|/shorts/|/)|youtu\.be/|"
+    r"youtube\.com(?:/watch\?v=|/embed/|/shorts/|/)|youtu\.be/|"
     r"facebook\.com/|"
     r"instagram\.com/|"
     r"tiktok\.com/(?:@[\w.-]+/video/|@[\w.-]+/|)|"
@@ -282,6 +282,8 @@ def build_application() -> Application:
     return application
 
 def main() -> None:
+    import time
+    time.sleep(60)
     mode = os.getenv("BOT_MODE", "polling").lower().strip()
     if mode == "webhook":
         import uvicorn
