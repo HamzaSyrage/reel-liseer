@@ -17,7 +17,7 @@ ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4/bestvideo+bestau
 #     }
 # }
 
-ydl_opts["impersonate"] = "chrome:windows-10"
+ydl_opts["impersonate"] = "chrome"
 
 ydl_opts["ffmpeg_location"] = ffmpeg_path
 
