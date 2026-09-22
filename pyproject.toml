@@ -13,7 +13,7 @@ dependencies = [
     "python-dotenv>=1.2.3",
     "python-telegram-bot>=22.8",
     "uvicorn>=0.53.0",
-    "yt-dlp>=2026.8.19",
+    "yt-dlp[curl-cffi,default]>=2026.8.19",
 ]
 
 [project.scripts]
