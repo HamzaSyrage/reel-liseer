@@ -41,11 +41,6 @@ async def lifespan(app: FastAPI):
         logger.info("Application shutdown started")
 
         try:
-            await ptb_app.bot.delete_webhook()
-        except Exception:
-            logger.exception("Failed to delete webhook")
-
-        try:
             await ptb_app.stop()
         except Exception:
             logger.exception("Failed to stop Telegram application")

@@ -282,9 +282,9 @@ def build_application() -> Application:
     return application
 
 def main() -> None:
-    import time
-    logger.info("Waiting 60 seconds for the bot to be ready...")
-    time.sleep(60)
+    # import time
+    # logger.info("Waiting 60 seconds for the bot to be ready...")
+    # time.sleep(60)
     mode = os.getenv("BOT_MODE", "polling").lower().strip()
     if mode == "webhook":
         import uvicorn
