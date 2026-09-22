@@ -283,6 +283,7 @@ def build_application() -> Application:
 
 def main() -> None:
     import time
+    logger.info("Waiting 60 seconds for the bot to be ready...")
     time.sleep(60)
     mode = os.getenv("BOT_MODE", "polling").lower().strip()
     if mode == "webhook":
