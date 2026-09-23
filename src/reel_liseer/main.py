@@ -176,7 +176,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         link = extract_link_from_message(update.message)
         if not is_accepted_social_link(link):
-            await update.message.reply_text("That doesn't look like a valid link on a supported platform.")
+            # await update.message.reply_text("That doesn't look like a valid link on a supported platform.")
             return
 
         if context.user_data.get('waiting_a_url_for_options'):
@@ -215,9 +215,9 @@ async def options_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         link = extract_link_from_message(update.message)
         if not link or not is_accepted_social_link(link):
-            # message = await update.message.reply_text("That doesn't look like a valid link on a supported platform.")
+            message = await update.message.reply_text("That doesn't look like a valid link on a supported platform.")
             # async 5 sec and then delete
-            # delete_after(message,5)
+            delete_after(message,5)
             return
 
         await show_format_options(update, context, link)
