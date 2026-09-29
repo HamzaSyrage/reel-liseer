@@ -8,7 +8,7 @@ ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
 
 ydl_opts = {}
 ydl_opts['paths'] = {'home': config.DOWNLOAD_PATH}
-ydl_opts['format'] = 'bestvideo[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4/bestvideo+bestaudio/best/bestvideo+bestaudio'
+ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4/bestvideo+bestaudio/best/bestvideo+bestaudio'
 # ydl_opts['outtmpl'] = "tessssst"
 
 # ydl_opts['extractor_args'] = {
