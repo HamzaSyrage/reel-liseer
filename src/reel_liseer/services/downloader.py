@@ -1,5 +1,5 @@
-import json
-import os
+from uuid import uuid4
+
 import yt_dlp
 from reel_liseer import config
 import imageio_ffmpeg
@@ -7,7 +7,7 @@ import imageio_ffmpeg
 ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
 
 ydl_opts = {}
-ydl_opts['paths'] = {'home': config.DOWLOAD_PATH}
+ydl_opts['paths'] = {'home': config.DOWNLOAD_PATH}
 ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4/bestvideo+bestaudio/best/bestvideo+bestaudio'
 # ydl_opts['outtmpl'] = "tessssst"
 
@@ -44,13 +44,14 @@ ydl_opts["ffmpeg_location"] = ffmpeg_path
 # TEMP
 ydl_opts["verbose"] = True
 
-def download(url,outtmpl):
+def download(url):
     l_ydl_opts= ydl_opts.copy()
-    l_ydl_opts['outtmpl'] = f"{outtmpl}.%(ext)s"
-    
+    l_ydl_opts['outtmpl'] = f"%(title)s_{uuid4()}.%(ext)s"
+
     with yt_dlp.YoutubeDL(l_ydl_opts) as ydl:
         info_dict = ydl.extract_info(url, download=False)
-        file_extension = info_dict.get('ext', None)
+        # file_name = info_dict.get('title', 'video')
+        # file_extension = info_dict.get('ext', None)
         ydl.download([url])
         downloaded_file = ydl.prepare_filename(info_dict)
 
@@ -64,12 +65,12 @@ def format_size(b: int) -> str:
     u = ["Bytes", "KB", "MB", "GB", "TB", "PB"][i]
     return f"{b:.2f} {u}" if i else f"{orig} Bytes"
 
-def get_video_title(url):
-    l_ydl_opts = ydl_opts.copy()
-    l_ydl_opts.pop('format', None)
-    with yt_dlp.YoutubeDL(l_ydl_opts) as ydl:
-        meta = ydl.extract_info(url, download=False)
-    return meta.get('title', 'video')
+# def get_video_title(url):
+#     l_ydl_opts = ydl_opts.copy()
+#     l_ydl_opts.pop('format', None)
+#     with yt_dlp.YoutubeDL(l_ydl_opts) as ydl:
+#         meta = ydl.extract_info(url, download=False)
+#     return meta.get('title', 'video')
 
 def get_video_formats(url):
     l_ydl_opts = ydl_opts.copy()

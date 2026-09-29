@@ -4,7 +4,7 @@ from datetime import datetime, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from reel_liseer.services.downloader import download, get_video_title, get_video_formats, download_with_format
+from reel_liseer.services.downloader import download, get_video_formats, download_with_format
 import os
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -20,7 +20,8 @@ SOCIAL_REGEX = (
     r"facebook\.com/|"
     r"instagram\.com/|"
     r"tiktok\.com/(?:@[\w.-]+/video/|@[\w.-]+/|)|"
-    r"twitter\.com/|x\.com/"
+    r"twitter\.com/|x\.com/|"
+    r"reddit\.com/|redd\.it/|redditmedia\.com/|redditstatic\.com/|"
     r")([\w.-]+)"
 )
 LONGFORM_YOUTUBE_REGEX = (
@@ -128,15 +129,15 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def send_downloaded_file(update: Update, context: ContextTypes.DEFAULT_TYPE, link: str):
     user = update.effective_user
-    title = await asyncio.to_thread(get_video_title, link)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_name = f"{sanitize_filename(title)}_{timestamp}"
-    downloadedFile = await asyncio.to_thread(download, link, file_name)
+    # title = await asyncio.to_thread(get_video_title, link)
+    # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # file_name = f"{sanitize_filename(title)}_{timestamp}"
+    downloaded_file= await asyncio.to_thread(download, link)
     try:
-        await update.message.reply_video(downloadedFile)
+        await update.message.reply_video(downloaded_file)
     finally:
-        if Path(downloadedFile).exists():
-            Path(downloadedFile).unlink()
+        if Path(downloaded_file).exists():
+            Path(downloaded_file).unlink()
 
 async def show_format_options(update: Update, context: ContextTypes.DEFAULT_TYPE, link: str):
     try:
