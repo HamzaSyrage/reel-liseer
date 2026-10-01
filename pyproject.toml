@@ -19,8 +19,27 @@ dependencies = [
 [project.scripts]
 reel-liseer = "reel_liseer:main"
 
+[dependency-groups]
+dev = [
+    "ruff>=0.14.0",
+]
+
 [tool.fastapi]
-entrypoint = "src.reel_liseer.webapp:app"
+entrypoint = "src/reel_liseer.webapp:app"
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC"]
+ignore = ["E501", "E402"]
+
+[tool.ruff.lint.isort]
+# main.py must keep the reel_liseer imports below its sys.path bootstrap so
+# `python src/reel_liseer/main.py` keeps working.
+combine-as-imports = true
 
 [build-system]
 requires = ["uv_build>=0.12.13,<0.13.0"]

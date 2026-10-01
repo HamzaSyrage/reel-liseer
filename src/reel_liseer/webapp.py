@@ -4,7 +4,6 @@ from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse
 from telegram import Update
 
 from reel_liseer.main import build_application

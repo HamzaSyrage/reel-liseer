@@ -1,29 +1,43 @@
 import asyncio
 import sys
-from datetime import datetime, time
+from datetime import datetime
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from reel_liseer.services.downloader import download, get_video_formats, download_with_format
 import os
-from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler
 import re
+
+from dotenv import load_dotenv
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
+from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler
+
+from reel_liseer import config
+from reel_liseer.services.downloader import download, download_with_format, get_video_formats
+from reel_liseer.services.media import cleanup_downloads, make_thumbnail, probe as media_probe, to_telegram_safe
 
 URL_REGEX = r"^https?://(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{2,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*)$"
 URL_PATTERN = r'https?://[^\s<>"]+|www\.[^\s<>"]+'
 SOCIAL_REGEX = (
-    r"^https?://(?:[a-z0-9-]+\.)?(?:"
-    # ! Sorry
-    r"youtube\.com(?:/watch\?v=|/embed/|/shorts/|/)|youtu\.be/|"
-    r"facebook\.com/|"
-    r"instagram\.com/|"
-    r"tiktok\.com/(?:@[\w.-]+/video/|@[\w.-]+/|)|"
-    r"twitter\.com/|x\.com/|"
-    r"reddit\.com/|redd\.it/|redditmedia\.com/|redditstatic\.com/|"
-    r")([\w.-]+)"
+    r"https?://(?:www\.)?"
+    r"(?:"
+    r"youtube\.com/(?:watch/?\?|embed/|shorts/|live/|v/|playlist\?)"
+    r"|youtu\.be/"
+    r"|facebook\.com/(?:watch/?\?|reel/|reels/|share/v/|share/r/)"
+    r"|instagram\.com/(?:p|reel|reels|tv|stories)/"
+    r"|tiktok\.com/@[\w.-]+/(?:video/)?"
+    r"|(?:twitter|x)\.com/[\w.-]+/status(?:es)?/"
+    r"|reddit\.(?:com|it)/r/"
+    r"|(?:i\.)?redd\.it/"
+    r"|(?:[\w-]+\.)?redditmedia\.com/"
+    r"|(?:[\w-]+\.)?redditstatic\.com/"
+    r"|media\.tenor\.(?:com|co)/"
+    r"|(?:media|i)\.giphy\.com/"
+    r"|i\.imgur\.com/"
+    r")"
+    r"[\w./?=&%#:+~-]+"
 )
+
 LONGFORM_YOUTUBE_REGEX = (
     r"^https?://(?:[a-z0-9-]+\.)?(?:"
     r"youtube\.com(?:/watch\?v=|/embed/|/v/|/)|youtu\.be/"
@@ -42,7 +56,7 @@ def extract_link_from_message(message):
     return match[0] if match else None
 
 def is_accepted_social_link(text):
-    return isinstance(text, str) and bool(re.match(SOCIAL_REGEX, text, re.IGNORECASE))
+    return isinstance(text, str) and bool(re.fullmatch(SOCIAL_REGEX, text, re.IGNORECASE))
 
 def is_a_longform_youtube_link(text):
     if not isinstance(text, str):
@@ -68,13 +82,18 @@ load_dotenv()
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
 import logging
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+
+from telegram.ext import Application, filters
+from telegram.request import HTTPXRequest
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+
+# heavy work is queued
+JOB_SEMAPHORE = asyncio.Semaphore(config.MAX_CONCURRENT_JOBS)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
@@ -127,17 +146,59 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 #             f"YouTube test failed:\n{type(e).__name__}: {e}"
 #         )
 
-async def send_downloaded_file(update: Update, context: ContextTypes.DEFAULT_TYPE, link: str):
-    user = update.effective_user
-    # title = await asyncio.to_thread(get_video_title, link)
-    # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # file_name = f"{sanitize_filename(title)}_{timestamp}"
-    downloaded_file= await asyncio.to_thread(download, link)
+async def deliver_media(bot, chat_id: int, media: dict):
+    path = Path(media['path'])
+    thumbnail = None
+    transcode_to = None
+
     try:
-        await update.message.reply_video(downloaded_file)
+        info = await asyncio.to_thread(media_probe, path, media)
+
+        if info.is_animation():
+            # streamed from disk rather than read into memory
+            with open(path, "rb") as animation_file:  # noqa: ASYNC230
+                await bot.send_animation(
+                    chat_id=chat_id,
+                    animation=InputFile(
+                        animation_file, filename=path.name, read_file_handle=False
+                    ),
+                    duration=info.duration,
+                    width=info.width,
+                    height=info.height,
+                )
+            return
+
+        if info.needs_transcode():
+            transcode_to = await asyncio.to_thread(to_telegram_safe, path)
+            path = transcode_to
+            info = await asyncio.to_thread(media_probe, path, {})
+
+        thumbnail = await asyncio.to_thread(make_thumbnail, path)
+
+        caption = (media.get('title') or '')[:1024] or None
+
+        with open(path, "rb") as video_file:  # noqa: ASYNC230
+            await bot.send_video(
+                chat_id=chat_id,
+                video=InputFile(video_file, filename=path.name, read_file_handle=False),
+                duration=info.duration,
+                width=info.width,
+                height=info.height,
+                thumbnail=str(thumbnail) if thumbnail else None,
+                supports_streaming=True,
+                caption=caption,
+            )
     finally:
-        if Path(downloaded_file).exists():
-            Path(downloaded_file).unlink()
+        if thumbnail:
+            Path(thumbnail).unlink(missing_ok=True)  # noqa: ASYNC240
+        if transcode_to:
+            Path(transcode_to).unlink(missing_ok=True)  # noqa: ASYNC240
+        Path(media['path']).unlink(missing_ok=True)  # noqa: ASYNC240
+
+async def send_downloaded_file(update: Update, context: ContextTypes.DEFAULT_TYPE, link: str):
+    async with JOB_SEMAPHORE:
+        media = await asyncio.to_thread(download, link)
+        await deliver_media(context.bot, update.effective_chat.id, media)
 
 async def show_format_options(update: Update, context: ContextTypes.DEFAULT_TYPE, link: str):
     try:
@@ -249,18 +310,27 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         url = context.user_data['cache'][user.id]['url']
         outtmpl = context.user_data['cache'][user.id]['outtmpl']
-        downloaded_file = await asyncio.to_thread(download_with_format, url=url, outtmpl=outtmpl, format=format_str)
 
-        try:
+        async with JOB_SEMAPHORE:
+            media = await asyncio.to_thread(
+                download_with_format, url=url, outtmpl=outtmpl, format=format_str
+            )
+
             if not format_str.startswith('bestaudio'):
-                with open(downloaded_file, "rb") as video_file:
-                    await context.bot.send_video(chat_id=query.message.chat_id, video=video_file)
-            else:
-                with open(downloaded_file, "rb") as audio_file:
-                    await context.bot.send_audio(chat_id=query.message.chat_id, audio=audio_file)
-        finally:
-            if Path(downloaded_file).exists():
-                Path(downloaded_file).unlink()
+                await deliver_media(context.bot, query.message.chat_id, media)
+                return
+
+            try:
+                with open(media['path'], "rb") as audio_file:  # noqa: ASYNC230
+                    await context.bot.send_audio(
+                        chat_id=query.message.chat_id,
+                        audio=InputFile(
+                            audio_file, filename=Path(media['path']).name, read_file_handle=False
+                        ),
+                        title=media.get('title'),
+                    )
+            finally:
+                Path(media['path']).unlink(missing_ok=True)  # noqa: ASYNC240
     except Exception:
         logger.exception("Error handling callback")
         try:
@@ -272,7 +342,16 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.exception("Unhandled exception", exc_info=context.error)
 
 def build_application() -> Application:
-    application = Application.builder().token(TOKEN).build()
+    removed = cleanup_downloads()
+    if removed:
+        logger.info("Cleared %s leftover file(s) from %s", removed, config.DOWNLOAD_PATH)
+
+    application = (
+        Application.builder()
+        .token(TOKEN)
+        .request(HTTPXRequest(media_write_timeout=config.MEDIA_WRITE_TIMEOUT))
+        .build()
+    )
     application.add_handler(CommandHandler("start", start))
     # application.add_handler(CommandHandler("test", test_command))
     application.add_handler(CommandHandler("ping", ping_command))

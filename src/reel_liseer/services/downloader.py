@@ -1,23 +1,19 @@
 from uuid import uuid4
-
+import imageio_ffmpeg
 import yt_dlp
 from reel_liseer import config
-import imageio_ffmpeg
 
 ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
 
 ydl_opts = {}
 ydl_opts['paths'] = {'home': config.DOWNLOAD_PATH}
-ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4/bestvideo+bestaudio/best/bestvideo+bestaudio'
-# ydl_opts['outtmpl'] = "tessssst"
-
-# ydl_opts['extractor_args'] = {
-#     'youtube': {
-#         'player_client': ['tv']
-#     }
-# }
-
-# ydl_opts["impersonate"] = "chrome"
+ydl_opts['format'] = (
+    'best[ext=mp4][vcodec^=avc1][height<=1080]+bestaudio[ext=m4a]/'
+    'best[ext=mp4][vcodec!*=vp]+bestaudio[ext=m4a]/'
+    'best[ext=mp4]/'
+    'bestvideo[ext=mp4]+bestaudio[ext=m4a]/'
+    'best/bestvideo+bestaudio/best'
+)
 
 ydl_opts["ffmpeg_location"] = ffmpeg_path
 
@@ -35,27 +31,43 @@ ydl_opts["ffmpeg_location"] = ffmpeg_path
 #         'player_client': ['default', 'web_embedded']
 #     }
 # }
-# def printing():
-#     return os.path.join(
-#     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-#     'youtube-cookies.txt'
-# )
 
-# TEMP
-ydl_opts["verbose"] = True
+ydl_opts['merge_output_format'] = 'mp4'
+ydl_opts['retries'] = 3
+ydl_opts['fragment_retries'] = 3
+ydl_opts['max_filesize'] = config.MAX_FILE_SIZE_MB * 1024 * 1024
+# ydl_opts['postprocessors'] = [
+#     {
+#         'key': 'FFmpegMetadata',
+#         'when': 'after_move'
+#     }
+# ]
+ydl_opts['concurrent_fragment_downloads'] = 1
+
+OUTTMPL = '%(title).100s.%(ext)s'
+
+
+def _media_metadata(info: dict, url: str, path: str) -> dict:
+    return {
+        'path': path,
+        'title': info.get('title') or 'media',
+        'duration': info.get('duration'),
+        'width': info.get('width'),
+        'height': info.get('height'),
+        'ext': info.get('ext'),
+        'webpage_url': info.get('webpage_url') or url,
+    }
+
 
 def download(url):
-    l_ydl_opts= ydl_opts.copy()
-    l_ydl_opts['outtmpl'] = f"%(title)s_{uuid4()}.%(ext)s"
+    l_ydl_opts = ydl_opts.copy()
+    l_ydl_opts['outtmpl'] = f"{uuid4().hex}_{OUTTMPL}"
 
     with yt_dlp.YoutubeDL(l_ydl_opts) as ydl:
-        info_dict = ydl.extract_info(url, download=False)
-        # file_name = info_dict.get('title', 'video')
-        # file_extension = info_dict.get('ext', None)
-        ydl.download([url])
+        info_dict = ydl.extract_info(url, download=True)
         downloaded_file = ydl.prepare_filename(info_dict)
 
-    return downloaded_file
+    return _media_metadata(info_dict, url, downloaded_file)
 
 def format_size(b: int) -> str:
     orig, i = b, 0
@@ -65,16 +77,11 @@ def format_size(b: int) -> str:
     u = ["Bytes", "KB", "MB", "GB", "TB", "PB"][i]
     return f"{b:.2f} {u}" if i else f"{orig} Bytes"
 
-# def get_video_title(url):
-#     l_ydl_opts = ydl_opts.copy()
-#     l_ydl_opts.pop('format', None)
-#     with yt_dlp.YoutubeDL(l_ydl_opts) as ydl:
-#         meta = ydl.extract_info(url, download=False)
-#     return meta.get('title', 'video')
 
 def get_video_formats(url):
     l_ydl_opts = ydl_opts.copy()
     l_ydl_opts.pop('format', None)
+    l_ydl_opts.pop('merge_output_format', None)
 
     with yt_dlp.YoutubeDL(l_ydl_opts) as ydl:
         meta = ydl.extract_info(url, download=False)
@@ -129,10 +136,13 @@ def get_video_formats(url):
     return meta.get('title', 'video'), result 
 
 
-def download_with_format(url,outtmpl,format):
+def download_with_format(url, outtmpl, format):
     l_ydl_opts = ydl_opts.copy()
     l_ydl_opts['outtmpl'] = f"{outtmpl}.%(ext)s"
     l_ydl_opts['format'] = format
+    if not format.startswith('bestaudio'):
+        l_ydl_opts['merge_output_format'] = 'mp4'
+
     with yt_dlp.YoutubeDL(l_ydl_opts) as ydl:
         info_dict = ydl.extract_info(url, download=True)
         downloaded_file = ydl.prepare_filename(info_dict)
@@ -140,4 +150,4 @@ def download_with_format(url,outtmpl,format):
     if format.startswith('bestaudio'):
         downloaded_file = f"{downloaded_file.rsplit('.', 1)[0]}.m4a"
 
-    return downloaded_file
+    return _media_metadata(info_dict, url, downloaded_file)
