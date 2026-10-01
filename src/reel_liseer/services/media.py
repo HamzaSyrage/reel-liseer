@@ -14,13 +14,8 @@ TELEGRAM_SAFE_VIDEO_CODECS = {"h264", "hevc", "av1"}
 
 THUMBNAIL_MAX_SIDE = 320
 
-# The host may report many cores while the container is throttled to a fraction of one
-# (0.5 vCPU). Letting x264 spawn a thread per host core in that situation causes heavy
-# context switching, so every ffmpeg call pins its thread count.
 FFMPEG_THREADS = config.FFMPEG_THREADS
 
-# Telegram does not need 1080p in a group chat, and halving the pixel count cuts the
-# fallback transcode cost (CPU time and output size) roughly fourfold.
 MAX_TRANSCODE_HEIGHT = 1280
 
 _DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)")

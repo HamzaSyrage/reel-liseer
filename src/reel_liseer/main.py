@@ -175,7 +175,7 @@ async def deliver_media(bot, chat_id: int, media: dict):
 
         thumbnail = await asyncio.to_thread(make_thumbnail, path)
 
-        caption = (media.get('title') or '')[:1024] or None
+        # caption = (media.get('title') or '')[:1024] or None
 
         with open(path, "rb") as video_file:  # noqa: ASYNC230
             await bot.send_video(
@@ -186,7 +186,7 @@ async def deliver_media(bot, chat_id: int, media: dict):
                 height=info.height,
                 thumbnail=str(thumbnail) if thumbnail else None,
                 supports_streaming=True,
-                caption=caption,
+                # caption=caption,
             )
     finally:
         if thumbnail:
