@@ -36,26 +36,6 @@ async def lifespan(app: FastAPI):
 
         yield
 
-    # finally:
-    #     logger.info("Application shutdown started")
-
-    #     try:
-    #         await ptb_app.bot.delete_webhook()
-    #     except Exception:
-    #         logger.exception("Failed to delete webhook")
-
-    #     try:
-    #         await ptb_app.stop()
-    #     except Exception:
-    #         logger.exception("Failed to stop Telegram application")
-
-    #     try:
-    #         await ptb_app.shutdown()
-    #     except Exception:
-    #         logger.exception("Failed to shutdown Telegram application")
-
-    #     logger.info("Application shutdown completed")
-    
     finally:
         logger.info("Application shutdown started")
 
@@ -70,10 +50,7 @@ async def lifespan(app: FastAPI):
             logger.exception("Failed to shutdown Telegram application")
 
         logger.info("Application shutdown completed")
-    
-    # except Exception:
-    #     logger.exception("Application failed to start")
-    #     raise
+
 
 app = FastAPI(lifespan=lifespan)
 
@@ -94,32 +71,3 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
-
-# @app.get("/youtube-cookies.txt")
-# def get_youtube_cookies():
-#     cookie_file_path = os.path.join(
-#         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-#         "youtube-cookies.txt",
-#     )
-#     return FileResponse(
-#         path=cookie_file_path,
-#         media_type="text/plain",
-#     )
-
-
-# @app.get("/txt")
-# def get_txt_cookies():
-#     cookie_file_path = "/app/src/youtube-cookies.txt"
-#     return FileResponse(
-#         path=cookie_file_path,
-#         media_type="text/plain",
-#     )
-
-
-# @app.get("/printing")
-# def get_printing():
-#     return {
-#         "status": "ok",
-#         "path": printing(),
-#     }

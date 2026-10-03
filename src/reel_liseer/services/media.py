@@ -42,7 +42,10 @@ class MediaInfo:
     def needs_transcode(self) -> bool:
         if self.is_animation():
             return False
-        return (self.vcodec or "").lower() not in TELEGRAM_SAFE_VIDEO_CODECS
+        vcodec = (self.vcodec or "").lower()
+        if not vcodec:
+            return False
+        return vcodec not in TELEGRAM_SAFE_VIDEO_CODECS
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess:
@@ -105,6 +108,9 @@ def make_thumbnail(path) -> Path | None:
 
 def to_telegram_safe(path) -> Path:
     path = Path(path)
+    if not path.is_file() or path.stat().st_size == 0:
+        raise FileNotFoundError(f"cannot transcode missing or empty file: {path}")
+
     output = path.with_name(f"{path.stem}_{uuid4().hex}_safe.mp4")
 
     result = _run([
@@ -124,7 +130,6 @@ def to_telegram_safe(path) -> Path:
 
 
 def cleanup_downloads() -> int:
-    """Remove leftovers from a previous crash/restart so the disk never fills up."""
     removed = 0
     download_path = Path(config.DOWNLOAD_PATH)
     if not download_path.is_dir():

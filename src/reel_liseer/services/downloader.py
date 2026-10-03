@@ -1,6 +1,9 @@
+from pathlib import Path
 from uuid import uuid4
+
 import imageio_ffmpeg
 import yt_dlp
+
 from reel_liseer import config
 
 ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
@@ -46,6 +49,9 @@ ydl_opts['concurrent_fragment_downloads'] = 1
 
 OUTTMPL = '%(title).100s.%(ext)s'
 
+GOOD_VIDEO_CODECS = ('avc1', 'h264', 'hev1', 'hvc1')
+KNOWN_BAD_VIDEO_CODECS = ('vp9', 'vp09', 'vp8', 'av01', 'theora', 'mp4v')
+
 
 def _media_metadata(info: dict, url: str, path: str) -> dict:
     return {
@@ -59,15 +65,95 @@ def _media_metadata(info: dict, url: str, path: str) -> dict:
     }
 
 
+def _estimated_size(fmt: dict, duration) -> int:
+    size = fmt.get('filesize') or fmt.get('filesize_approx')
+    if not size and fmt.get('tbr') and duration:
+        size = fmt['tbr'] * 1000 / 8 * duration
+    return size or 0
+
+
+def _codec_tier(fmt: dict) -> int | None:
+    vcodec = fmt.get('vcodec')
+    if vcodec == 'none':
+        return None
+    if vcodec is None:
+        return 1
+    vcodec = vcodec.lower()
+    if any(bad in vcodec for bad in KNOWN_BAD_VIDEO_CODECS):
+        return 3
+    if any(good in vcodec for good in GOOD_VIDEO_CODECS):
+        return 0
+    return 1
+
+
+def select_format_under_limit(info: dict, limit: int | None = None) -> str | None:
+    limit = limit or config.MAX_FILE_SIZE_MB * 1024 * 1024
+    duration = info.get('duration')
+    formats = info.get('formats') or [info]
+
+    videos = [
+        f for f in formats
+        if f.get('vcodec') != 'none' and _estimated_size(f, duration) <= limit
+    ]
+    if not videos:
+        return None
+
+    videos.sort(key=lambda f: (
+        _codec_tier(f),
+        -(f.get('height') or 0),
+        -(f.get('tbr') or 0),
+    ))
+    video = videos[0]
+
+    if video.get('acodec') != 'none':
+        return video['format_id']
+
+    audios = [
+        f for f in formats
+        if f.get('vcodec') == 'none'
+        and f.get('acodec') != 'none'
+        and _estimated_size(f, duration) <= limit
+    ]
+    if not audios:
+        return video['format_id']
+
+    audios.sort(key=lambda f: -(f.get('tbr') or 0))
+    audio = audios[0]
+
+    if _estimated_size(video, duration) + _estimated_size(audio, duration) > limit:
+        return video['format_id']
+
+    return f"{video['format_id']}+{audio['format_id']}"
+
+
 def download(url):
-    l_ydl_opts = ydl_opts.copy()
-    l_ydl_opts['outtmpl'] = f"{uuid4().hex}_{OUTTMPL}"
+    metadata_opts = ydl_opts.copy()
+    metadata_opts.pop('format', None)
+    metadata_opts.pop('merge_output_format', None)
 
-    with yt_dlp.YoutubeDL(l_ydl_opts) as ydl:
+    with yt_dlp.YoutubeDL(metadata_opts) as ydl:
+        info_dict = ydl.extract_info(url, download=False)
+
+    if info_dict.get('_type') == 'playlist' and info_dict.get('entries'):
+        info_dict = info_dict['entries'][0]
+
+    format_spec = select_format_under_limit(info_dict)
+    if not format_spec:
+        raise RuntimeError(f"no format fits within {config.MAX_FILE_SIZE_MB} MB: {url}")
+
+    opts = ydl_opts.copy()
+    opts['format'] = format_spec
+    opts['outtmpl'] = f"{uuid4().hex}_{OUTTMPL}"
+
+    with yt_dlp.YoutubeDL(opts) as ydl:
         info_dict = ydl.extract_info(url, download=True)
-        downloaded_file = ydl.prepare_filename(info_dict)
+        downloaded_file = Path(ydl.prepare_filename(info_dict))
 
-    return _media_metadata(info_dict, url, downloaded_file)
+    if not downloaded_file.is_file() or downloaded_file.stat().st_size == 0:
+        downloaded_file.unlink(missing_ok=True)
+        raise RuntimeError(f"yt-dlp produced no file for {url}")
+
+    return _media_metadata(info_dict, url, str(downloaded_file))
 
 def format_size(b: int) -> str:
     orig, i = b, 0

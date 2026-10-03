@@ -69,12 +69,6 @@ def sanitize_filename(name):
     return re.sub(r'[^\w\s-]', '', name).strip().replace(' ', '_')
 
 def reply_parameters_for(message_id: int | None) -> ReplyParameters | None:
-    """Anchor a send to the message that triggered it.
-
-    ``allow_sending_without_reply`` keeps the send working when the anchor is already
-    gone: the bot deletes its own messages (format menus, transient notices) and the
-    Bot API rejects the whole request otherwise.
-    """
     if not message_id:
         return None
     return ReplyParameters(message_id=message_id, allow_sending_without_reply=True)
@@ -119,44 +113,6 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception:
         logger.exception("Error in ping handler")
 
-# async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-#     try:
-#         await update.message.reply_text("Starting YouTube test...")
-#
-#         output_path = "/app/src/reel_liseer/.downloaded-media/test-youtube"
-#
-#         ydl_opts = {
-#             "cookiefile": "/app/src/youtube-cookies.txt",
-#             "format": "best[ext=mp4]/best",
-#             "outtmpl": f"{output_path}.%(ext)s",
-#             "verbose": True,
-#             "extractor_args" : {
-#                 'youtube': {
-#                     'player_client': ['default', 'web_embedded']
-#                     }
-#             }
-#         }
-#
-#         def run_download():
-#             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-#                 info = ydl.extract_info(
-#                     "https://www.youtube.com/watch?v=DogH-RgansQ",
-#                     download=False
-#                     )
-#                 return ydl.prepare_filename(info)
-#
-#         downloaded_file = await asyncio.to_thread(run_download)
-#
-#         await update.message.reply_text(
-#             f"Download succeeded:\n{downloaded_file}"
-#         )
-#
-#     except Exception as e:
-#         logger.exception("YouTube test failed")
-#         await update.message.reply_text(
-#             f"YouTube test failed:\n{type(e).__name__}: {e}"
-#         )
-
 async def deliver_media(
     bot,
     chat_id: int,
@@ -169,11 +125,13 @@ async def deliver_media(
     transcode_to = None
     reply_parameters = reply_parameters_for(reply_to_message_id)
 
+    if not path.is_file() or path.stat().st_size == 0:  # noqa: ASYNC240
+        raise RuntimeError(f"downloaded file is missing or empty: {path}")
+
     try:
         info = await asyncio.to_thread(media_probe, path, media)
 
         if info.is_animation():
-            # streamed from disk rather than read into memory
             with open(path, "rb") as animation_file:  # noqa: ASYNC230
                 await bot.send_animation(
                     chat_id=chat_id,
@@ -238,8 +196,6 @@ async def show_format_options(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         if 'cache' not in context.user_data:
             context.user_data['cache'] = {}
-        # The keyboard message is deleted when a button is tapped, so remember the
-        # message that actually asked for the download to reply to later.
         context.user_data['cache'][user.id] = {
             "outtmpl": file_name,
             "url": link,
@@ -328,8 +284,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = query.from_user
         callback_data = query.data
 
-        # Read the cache before deleting the keyboard message, otherwise the expiry
-        # notice below has nothing left to reply to.
         entry = context.user_data.get('cache', {}).get(user.id)
         if entry is None:
             await context.bot.send_message(
@@ -412,9 +366,6 @@ def build_application() -> Application:
     return application
 
 def main() -> None:
-    # import time
-    # logger.info("Waiting 60 seconds for the bot to be ready...")
-    # time.sleep(60)
     mode = os.getenv("BOT_MODE", "polling").lower().strip()
     if mode == "webhook":
         import uvicorn
