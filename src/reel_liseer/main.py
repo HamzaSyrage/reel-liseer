@@ -9,7 +9,7 @@ import os
 import re
 
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ReplyParameters, Update
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler
 
 from reel_liseer import config
@@ -67,6 +67,17 @@ def is_a_longform_youtube_link(text):
 
 def sanitize_filename(name):
     return re.sub(r'[^\w\s-]', '', name).strip().replace(' ', '_')
+
+def reply_parameters_for(message_id: int | None) -> ReplyParameters | None:
+    """Anchor a send to the message that triggered it.
+
+    ``allow_sending_without_reply`` keeps the send working when the anchor is already
+    gone: the bot deletes its own messages (format menus, transient notices) and the
+    Bot API rejects the whole request otherwise.
+    """
+    if not message_id:
+        return None
+    return ReplyParameters(message_id=message_id, allow_sending_without_reply=True)
 
 def delete_after(message, seconds):
     async def delete_message():
@@ -146,10 +157,17 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 #             f"YouTube test failed:\n{type(e).__name__}: {e}"
 #         )
 
-async def deliver_media(bot, chat_id: int, media: dict):
+async def deliver_media(
+    bot,
+    chat_id: int,
+    media: dict,
+    reply_to_message_id: int | None = None,
+    message_thread_id: int | None = None,
+):
     path = Path(media['path'])
     thumbnail = None
     transcode_to = None
+    reply_parameters = reply_parameters_for(reply_to_message_id)
 
     try:
         info = await asyncio.to_thread(media_probe, path, media)
@@ -165,6 +183,8 @@ async def deliver_media(bot, chat_id: int, media: dict):
                     duration=info.duration,
                     width=info.width,
                     height=info.height,
+                    message_thread_id=message_thread_id,
+                    reply_parameters=reply_parameters,
                 )
             return
 
@@ -187,6 +207,8 @@ async def deliver_media(bot, chat_id: int, media: dict):
                 thumbnail=str(thumbnail) if thumbnail else None,
                 supports_streaming=True,
                 # caption=caption,
+                message_thread_id=message_thread_id,
+                reply_parameters=reply_parameters,
             )
     finally:
         if thumbnail:
@@ -198,7 +220,13 @@ async def deliver_media(bot, chat_id: int, media: dict):
 async def send_downloaded_file(update: Update, context: ContextTypes.DEFAULT_TYPE, link: str):
     async with JOB_SEMAPHORE:
         media = await asyncio.to_thread(download, link)
-        await deliver_media(context.bot, update.effective_chat.id, media)
+        await deliver_media(
+            context.bot,
+            update.effective_chat.id,
+            media,
+            update.message.message_id,
+            update.message.message_thread_id,
+        )
 
 async def show_format_options(update: Update, context: ContextTypes.DEFAULT_TYPE, link: str):
     try:
@@ -210,7 +238,14 @@ async def show_format_options(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         if 'cache' not in context.user_data:
             context.user_data['cache'] = {}
-        context.user_data['cache'][user.id] = {"outtmpl": file_name, "url": link}
+        # The keyboard message is deleted when a button is tapped, so remember the
+        # message that actually asked for the download to reply to later.
+        context.user_data['cache'][user.id] = {
+            "outtmpl": file_name,
+            "url": link,
+            "source_message_id": update.message.message_id,
+            "source_thread_id": update.message.message_thread_id,
+        }
 
         keyboard_markup = [
             [
@@ -292,11 +327,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
         user = query.from_user
         callback_data = query.data
-        await query.delete_message()
 
-        if 'cache' not in context.user_data or user.id not in context.user_data['cache']:
-            await context.bot.send_message(chat_id=query.message.chat_id, text="Button expired (bot restarted). Please send the link again.")
+        # Read the cache before deleting the keyboard message, otherwise the expiry
+        # notice below has nothing left to reply to.
+        entry = context.user_data.get('cache', {}).get(user.id)
+        if entry is None:
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="Button expired (bot restarted). Please send the link again.",
+                reply_parameters=reply_parameters_for(query.message.message_id),
+            )
+            await query.delete_message()
             return
+
+        await query.delete_message()
 
         if callback_data == "bestaudio":
             format_str = "bestaudio[ext=m4a]/bestaudio"
@@ -308,8 +352,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             format_str = callback_data
 
-        url = context.user_data['cache'][user.id]['url']
-        outtmpl = context.user_data['cache'][user.id]['outtmpl']
+        url = entry['url']
+        outtmpl = entry['outtmpl']
+        source_message_id = entry.get('source_message_id')
+        source_thread_id = entry.get('source_thread_id')
 
         async with JOB_SEMAPHORE:
             media = await asyncio.to_thread(
@@ -317,7 +363,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
             if not format_str.startswith('bestaudio'):
-                await deliver_media(context.bot, query.message.chat_id, media)
+                await deliver_media(
+                    context.bot,
+                    query.message.chat_id,
+                    media,
+                    source_message_id,
+                    source_thread_id,
+                )
                 return
 
             try:
@@ -328,15 +380,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             audio_file, filename=Path(media['path']).name, read_file_handle=False
                         ),
                         title=media.get('title'),
+                        message_thread_id=source_thread_id,
+                        reply_parameters=reply_parameters_for(source_message_id),
                     )
             finally:
                 Path(media['path']).unlink(missing_ok=True)  # noqa: ASYNC240
     except Exception:
         logger.exception("Error handling callback")
-        try:
-            await context.bot.send_message(chat_id=query.message.chat_id)
-        except Exception:
-            logger.exception("Could not send callback error message")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.exception("Unhandled exception", exc_info=context.error)
