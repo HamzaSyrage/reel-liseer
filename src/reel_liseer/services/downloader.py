@@ -1,8 +1,10 @@
 import html
 import logging
 import re
+import shutil
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
@@ -10,6 +12,7 @@ import imageio_ffmpeg
 import yt_dlp
 
 from reel_liseer import config
+from reel_liseer.services import cookies
 
 ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -18,21 +21,6 @@ ydl_opts['paths'] = {'home': config.DOWNLOAD_PATH}
 ydl_opts['format'] = 'bestvideo+bestaudio/best'
 
 ydl_opts["ffmpeg_location"] = ffmpeg_path
-
-# ydl_opts['cookiefile'] = os.path.join(
-#     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-#     'youtube-cookies.txt'
-# )
-
-# ydl_opts['cookiefile'] = "/app/src/youtube-cookies.txt"
-# print("COOKIE FILE:", ydl_opts["cookiefile"])
-# print("COOKIE EXISTS:", os.path.exists(ydl_opts["cookiefile"]))
-# print("COOKIE SIZE:", os.path.getsize(ydl_opts["cookiefile"]) if os.path.exists(ydl_opts["cookiefile"]) else None)
-# ydl_opts['extractor_args'] = {
-#     'youtube': {
-#         'player_client': ['default', 'web_embedded']
-#     }
-# }
 
 ydl_opts['merge_output_format'] = 'mp4'
 ydl_opts['retries'] = 3
@@ -46,6 +34,40 @@ ydl_opts['fragment_retries'] = 3
 ydl_opts['concurrent_fragment_downloads'] = 1
 
 logger = logging.getLogger(__name__)
+
+
+def js_runtimes() -> dict:
+    found: dict = {}
+    try:
+        import deno
+
+        found['deno'] = {'path': str(deno.find_deno_bin())}
+    except Exception:  # noqa: BLE001 - optional dependency / binary missing
+        if shutil.which('deno'):
+            found['deno'] = {}
+    for name in ('node', 'bun'):
+        if shutil.which(name):
+            found[name] = {}
+    return found
+
+
+JS_RUNTIMES = js_runtimes()
+
+
+@contextmanager
+def _opts(**overrides):
+    opts = dict(ydl_opts)
+    if JS_RUNTIMES:
+        opts['js_runtimes'] = JS_RUNTIMES
+    for key, value in overrides.items():
+        if value is None:
+            opts.pop(key, None)
+        else:
+            opts[key] = value
+    with cookies.cookiefile() as cookie_path:
+        if cookie_path:
+            opts['cookiefile'] = cookie_path
+        yield opts
 
 OUTTMPL = '%(title).100s.%(ext)s'
 
@@ -163,11 +185,7 @@ def download(url):
     direct_url, reddit_title = resolve_reddit(url)
     source = direct_url or url
 
-    metadata_opts = ydl_opts.copy()
-    metadata_opts.pop('format', None)
-    metadata_opts.pop('merge_output_format', None)
-
-    with yt_dlp.YoutubeDL(metadata_opts) as ydl:
+    with _opts(format=None, merge_output_format=None) as metadata_opts, yt_dlp.YoutubeDL(metadata_opts) as ydl:
         info_dict = ydl.extract_info(source, download=False)
 
     if info_dict.get('_type') == 'playlist' and info_dict.get('entries'):
@@ -177,11 +195,7 @@ def download(url):
     if not format_spec:
         raise RuntimeError(f"no playable video format found: {url}")
 
-    opts = ydl_opts.copy()
-    opts['format'] = format_spec
-    opts['outtmpl'] = f"{uuid4().hex}_{OUTTMPL}"
-
-    with yt_dlp.YoutubeDL(opts) as ydl:
+    with _opts(format=format_spec, outtmpl=f"{uuid4().hex}_{OUTTMPL}") as opts, yt_dlp.YoutubeDL(opts) as ydl:
         info_dict = ydl.extract_info(source, download=True)
         downloaded_file = Path(ydl.prepare_filename(info_dict))
 
@@ -203,11 +217,7 @@ def format_size(b: int) -> str:
 def get_video_formats(url):
     direct_url, reddit_title = resolve_reddit(url)
 
-    l_ydl_opts = ydl_opts.copy()
-    l_ydl_opts.pop('format', None)
-    l_ydl_opts.pop('merge_output_format', None)
-
-    with yt_dlp.YoutubeDL(l_ydl_opts) as ydl:
+    with _opts(format=None, merge_output_format=None) as l_ydl_opts, yt_dlp.YoutubeDL(l_ydl_opts) as ydl:
         meta = ydl.extract_info(direct_url or url, download=False)
 
     formats = meta.get('formats', [])
@@ -263,13 +273,11 @@ def get_video_formats(url):
 def download_with_format(url, outtmpl, format):
     direct_url, reddit_title = resolve_reddit(url)
 
-    l_ydl_opts = ydl_opts.copy()
-    l_ydl_opts['outtmpl'] = f"{outtmpl}.%(ext)s"
-    l_ydl_opts['format'] = format
+    overrides = {'outtmpl': f"{outtmpl}.%(ext)s", 'format': format}
     if not format.startswith('bestaudio'):
-        l_ydl_opts['merge_output_format'] = 'mp4'
+        overrides['merge_output_format'] = 'mp4'
 
-    with yt_dlp.YoutubeDL(l_ydl_opts) as ydl:
+    with _opts(**overrides) as l_ydl_opts, yt_dlp.YoutubeDL(l_ydl_opts) as ydl:
         info_dict = ydl.extract_info(direct_url or url, download=True)
         downloaded_file = ydl.prepare_filename(info_dict)
 
@@ -277,3 +285,16 @@ def download_with_format(url, outtmpl, format):
         downloaded_file = f"{downloaded_file.rsplit('.', 1)[0]}.m4a"
 
     return _media_metadata(info_dict, url, downloaded_file, reddit_title)
+
+
+
+def probe_url(url: str) -> dict:
+    direct_url, _ = resolve_reddit(url)
+    with _opts(format=None, merge_output_format=None) as opts:
+        opts['skip_download'] = True
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(direct_url or url, download=False)
+    if info.get('_type') == 'playlist' and info.get('entries'):
+        info = info['entries'][0]
+    return {'title': info.get('title'), 'extractor': info.get('extractor_key'),
+            'formats': len(info.get('formats') or [])}

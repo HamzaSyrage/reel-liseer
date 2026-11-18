@@ -6,7 +6,9 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from telegram import Update
 
+from reel_liseer.admin import router as admin_router
 from reel_liseer.main import build_application
+from reel_liseer.services import cookies
 
 load_dotenv()
 
@@ -20,6 +22,7 @@ ptb_app = build_application()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting application")
+    cookies.seed_from_env()
 
     try:
         await ptb_app.initialize()
@@ -53,6 +56,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(admin_router)
 
 
 @app.post(f"/{WEBHOOK_PATH}")

@@ -95,6 +95,12 @@ This bot is tuned to run on a very small instance (0.5 vCPU / 512 MB):
 
 Every value in `.env.example` is overridable through the environment.
 
+## Cookies & admin page
+
+Hosted IPs are blocked by YouTube/TikTok without login cookies. Set `ADMIN_USERNAME`/`ADMIN_PASSWORD`, open `/admin` and log in
+and upload a cookies.txt (universal or per site). The page/API are disabled while `ADMIN_PASSWORD` is empty.
+Full instructions, including persistence on Render: [COOKIES.md](COOKIES.md).
+
 ## Commands
 
 | Command           | Description                 |
