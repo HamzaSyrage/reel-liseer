@@ -350,12 +350,21 @@ def build_application() -> Application:
     if removed:
         logger.info("Cleared %s leftover file(s) from %s", removed, config.DOWNLOAD_PATH)
 
-    application = (
-        Application.builder()
-        .token(TOKEN)
-        .request(HTTPXRequest(media_write_timeout=config.MEDIA_WRITE_TIMEOUT))
-        .build()
+    request = HTTPXRequest(
+        media_write_timeout=config.MEDIA_WRITE_TIMEOUT,
+        read_timeout=config.MEDIA_WRITE_TIMEOUT,
+        write_timeout=config.MEDIA_WRITE_TIMEOUT,
+        connect_timeout=30,
+        pool_timeout=30,
     )
+    builder = Application.builder().token(TOKEN).request(request)
+    if config.TELEGRAM_API_BASE_URL:
+        builder = (
+            builder.base_url(f"{config.TELEGRAM_API_BASE_URL}/bot")
+            .base_file_url(f"{config.TELEGRAM_API_BASE_URL}/file/bot")
+            .local_mode(True)
+        )
+    application = builder.build()
     application.add_handler(CommandHandler("start", start))
     # application.add_handler(CommandHandler("test", test_command))
     application.add_handler(CommandHandler("ping", ping_command))

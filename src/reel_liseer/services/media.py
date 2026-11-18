@@ -16,8 +16,6 @@ THUMBNAIL_MAX_SIDE = 320
 
 FFMPEG_THREADS = config.FFMPEG_THREADS
 
-MAX_TRANSCODE_HEIGHT = 1280
-
 _DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)")
 _VIDEO_STREAM_RE = re.compile(
     r"Stream #\d+:\d+.*?: Video: (?P<codec>[a-zA-Z0-9_]+).*?(?P<width>\d{2,5})x(?P<height>\d{2,5})",
@@ -115,7 +113,7 @@ def to_telegram_safe(path) -> Path:
 
     result = _run([
         *_base_ffmpeg_args(), "-y", "-i", str(path),
-        "-vf", f"scale=-2:min(ih\\,{MAX_TRANSCODE_HEIGHT})",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
         "-c:v", "libx264", "-preset", config.FFMPEG_PRESET, "-crf", str(config.FFMPEG_CRF),
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         "-c:a", "aac", "-b:a", "96k",

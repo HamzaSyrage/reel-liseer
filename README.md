@@ -89,8 +89,8 @@ This bot is tuned to run on a very small instance (0.5 vCPU / 512 MB):
 - Uploads are **streamed from disk**, so a large video never sits in memory.
 - ffmpeg thread counts are **pinned** (`FFMPEG_THREADS`), because ffmpeg otherwise spawns
   a thread per *host* core, which thrashes a throttled container.
-- Videos that need re-encoding are downscaled to 1280px height and encoded with
-  `veryfast`/`CRF 26`, which cuts both CPU time and file size roughly fourfold.
+- Videos that need re-encoding keep their resolution and are encoded with
+  `veryfast`/`CRF 26`.
 - Leftover files from a crash are cleared on startup.
 
 Every value in `.env.example` is overridable through the environment.

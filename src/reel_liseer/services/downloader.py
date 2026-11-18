@@ -1,3 +1,8 @@
+import html
+import logging
+import re
+import urllib.error
+import urllib.request
 from pathlib import Path
 from uuid import uuid4
 
@@ -10,13 +15,7 @@ ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
 
 ydl_opts = {}
 ydl_opts['paths'] = {'home': config.DOWNLOAD_PATH}
-ydl_opts['format'] = (
-    'best[ext=mp4][vcodec^=avc1][height<=1080]+bestaudio[ext=m4a]/'
-    'best[ext=mp4][vcodec!*=vp]+bestaudio[ext=m4a]/'
-    'best[ext=mp4]/'
-    'bestvideo[ext=mp4]+bestaudio[ext=m4a]/'
-    'best/bestvideo+bestaudio/best'
-)
+ydl_opts['format'] = 'bestvideo+bestaudio/best'
 
 ydl_opts["ffmpeg_location"] = ffmpeg_path
 
@@ -38,7 +37,6 @@ ydl_opts["ffmpeg_location"] = ffmpeg_path
 ydl_opts['merge_output_format'] = 'mp4'
 ydl_opts['retries'] = 3
 ydl_opts['fragment_retries'] = 3
-ydl_opts['max_filesize'] = config.MAX_FILE_SIZE_MB * 1024 * 1024
 # ydl_opts['postprocessors'] = [
 #     {
 #         'key': 'FFmpegMetadata',
@@ -47,29 +45,37 @@ ydl_opts['max_filesize'] = config.MAX_FILE_SIZE_MB * 1024 * 1024
 # ]
 ydl_opts['concurrent_fragment_downloads'] = 1
 
+logger = logging.getLogger(__name__)
+
 OUTTMPL = '%(title).100s.%(ext)s'
+
+BROWSER_UA = (
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+    '(KHTML, like Gecko) Chrome/138.0 Safari/537.36'
+)
+
+REDDIT_POST_RE = re.compile(
+    r'^https?://(?:www\.|old\.|new\.|m\.|np\.)?reddit\.com/'
+    r'(?P<path>r/[^/?#]+/comments/[A-Za-z0-9]+)(?:/[^?#]*)?/?(?:[?#].*)?$',
+    re.IGNORECASE,
+)
+_REDDIT_TITLE_RE = re.compile(r'id="embed-title".*?<h1[^>]*>(.*?)</h1>', re.DOTALL)
+_REDDIT_VIDEO_ID_RE = re.compile(r'v\.redd\.it/([A-Za-z0-9]{8,})')
 
 GOOD_VIDEO_CODECS = ('avc1', 'h264', 'hev1', 'hvc1')
 KNOWN_BAD_VIDEO_CODECS = ('vp9', 'vp09', 'vp8', 'av01', 'theora', 'mp4v')
 
 
-def _media_metadata(info: dict, url: str, path: str) -> dict:
+def _media_metadata(info: dict, url: str, path: str, title: str | None = None) -> dict:
     return {
         'path': path,
-        'title': info.get('title') or 'media',
+        'title': title or info.get('title') or 'media',
         'duration': info.get('duration'),
         'width': info.get('width'),
         'height': info.get('height'),
         'ext': info.get('ext'),
         'webpage_url': info.get('webpage_url') or url,
     }
-
-
-def _estimated_size(fmt: dict, duration) -> int:
-    size = fmt.get('filesize') or fmt.get('filesize_approx')
-    if not size and fmt.get('tbr') and duration:
-        size = fmt['tbr'] * 1000 / 8 * duration
-    return size or 0
 
 
 def _codec_tier(fmt: dict) -> int | None:
@@ -86,15 +92,10 @@ def _codec_tier(fmt: dict) -> int | None:
     return 1
 
 
-def select_format_under_limit(info: dict, limit: int | None = None) -> str | None:
-    limit = limit or config.MAX_FILE_SIZE_MB * 1024 * 1024
-    duration = info.get('duration')
+def select_format(info: dict) -> str | None:
     formats = info.get('formats') or [info]
 
-    videos = [
-        f for f in formats
-        if f.get('vcodec') != 'none' and _estimated_size(f, duration) <= limit
-    ]
+    videos = [f for f in formats if f.get('vcodec') != 'none']
     if not videos:
         return None
 
@@ -110,50 +111,85 @@ def select_format_under_limit(info: dict, limit: int | None = None) -> str | Non
 
     audios = [
         f for f in formats
-        if f.get('vcodec') == 'none'
-        and f.get('acodec') != 'none'
-        and _estimated_size(f, duration) <= limit
+        if f.get('vcodec') == 'none' and f.get('acodec') != 'none'
     ]
     if not audios:
         return video['format_id']
 
     audios.sort(key=lambda f: -(f.get('tbr') or 0))
-    audio = audios[0]
+    return f"{video['format_id']}+{audios[0]['format_id']}"
 
-    if _estimated_size(video, duration) + _estimated_size(audio, duration) > limit:
-        return video['format_id']
 
-    return f"{video['format_id']}+{audio['format_id']}"
+def _fetch_text(url: str, timeout: float = 15) -> str:
+    request = urllib.request.Request(
+        url,
+        headers={'User-Agent': BROWSER_UA, 'Accept-Language': 'en-US,en;q=0.9'},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+        return response.read().decode('utf-8', 'replace')
+
+
+def resolve_reddit(url: str) -> tuple[str | None, str | None]:
+    match = REDDIT_POST_RE.match(url or '')
+    if not match:
+        return None, None
+
+    path = match.group('path')
+    title = None
+    for page_url in (
+        f"https://embed.reddit.com/{path}/",
+        f"https://old.reddit.com/{path}/",
+        f"https://www.reddit.com/{path}/",
+    ):
+        try:
+            page = _fetch_text(page_url)
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            logger.warning("reddit page %s unavailable: %s", page_url, exc)
+            continue
+
+        if title is None:
+            title_match = _REDDIT_TITLE_RE.search(page)
+            if title_match:
+                title = html.unescape(re.sub(r'<[^>]+>', '', title_match.group(1))).strip() or None
+
+        video_id = _REDDIT_VIDEO_ID_RE.search(page)
+        if video_id:
+            return f"https://v.redd.it/{video_id.group(1)}/HLSPlaylist.m3u8", title
+
+    return None, title
 
 
 def download(url):
+    direct_url, reddit_title = resolve_reddit(url)
+    source = direct_url or url
+
     metadata_opts = ydl_opts.copy()
     metadata_opts.pop('format', None)
     metadata_opts.pop('merge_output_format', None)
 
     with yt_dlp.YoutubeDL(metadata_opts) as ydl:
-        info_dict = ydl.extract_info(url, download=False)
+        info_dict = ydl.extract_info(source, download=False)
 
     if info_dict.get('_type') == 'playlist' and info_dict.get('entries'):
         info_dict = info_dict['entries'][0]
 
-    format_spec = select_format_under_limit(info_dict)
+    format_spec = select_format(info_dict)
     if not format_spec:
-        raise RuntimeError(f"no format fits within {config.MAX_FILE_SIZE_MB} MB: {url}")
+        raise RuntimeError(f"no playable video format found: {url}")
 
     opts = ydl_opts.copy()
     opts['format'] = format_spec
     opts['outtmpl'] = f"{uuid4().hex}_{OUTTMPL}"
 
     with yt_dlp.YoutubeDL(opts) as ydl:
-        info_dict = ydl.extract_info(url, download=True)
+        info_dict = ydl.extract_info(source, download=True)
         downloaded_file = Path(ydl.prepare_filename(info_dict))
 
     if not downloaded_file.is_file() or downloaded_file.stat().st_size == 0:
         downloaded_file.unlink(missing_ok=True)
         raise RuntimeError(f"yt-dlp produced no file for {url}")
 
-    return _media_metadata(info_dict, url, str(downloaded_file))
+    return _media_metadata(info_dict, url, str(downloaded_file), reddit_title)
 
 def format_size(b: int) -> str:
     orig, i = b, 0
@@ -165,12 +201,14 @@ def format_size(b: int) -> str:
 
 
 def get_video_formats(url):
+    direct_url, reddit_title = resolve_reddit(url)
+
     l_ydl_opts = ydl_opts.copy()
     l_ydl_opts.pop('format', None)
     l_ydl_opts.pop('merge_output_format', None)
 
     with yt_dlp.YoutubeDL(l_ydl_opts) as ydl:
-        meta = ydl.extract_info(url, download=False)
+        meta = ydl.extract_info(direct_url or url, download=False)
 
     formats = meta.get('formats', [])
     video_formats = {}
@@ -219,10 +257,12 @@ def get_video_formats(url):
             'acodec': f['acodec'],
         })
 
-    return meta.get('title', 'video'), result 
+    return reddit_title or meta.get('title', 'video'), result
 
 
 def download_with_format(url, outtmpl, format):
+    direct_url, reddit_title = resolve_reddit(url)
+
     l_ydl_opts = ydl_opts.copy()
     l_ydl_opts['outtmpl'] = f"{outtmpl}.%(ext)s"
     l_ydl_opts['format'] = format
@@ -230,10 +270,10 @@ def download_with_format(url, outtmpl, format):
         l_ydl_opts['merge_output_format'] = 'mp4'
 
     with yt_dlp.YoutubeDL(l_ydl_opts) as ydl:
-        info_dict = ydl.extract_info(url, download=True)
+        info_dict = ydl.extract_info(direct_url or url, download=True)
         downloaded_file = ydl.prepare_filename(info_dict)
 
     if format.startswith('bestaudio'):
         downloaded_file = f"{downloaded_file.rsplit('.', 1)[0]}.m4a"
 
-    return _media_metadata(info_dict, url, downloaded_file)
+    return _media_metadata(info_dict, url, downloaded_file, reddit_title)
