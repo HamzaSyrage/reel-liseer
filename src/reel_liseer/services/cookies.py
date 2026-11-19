@@ -59,15 +59,34 @@ def _slot_path(slot: str) -> Path:
     return cookies_dir() / f"{slot_name(slot)}.txt"
 
 
-def _domain_allowed(domain: str) -> bool:
+_HOST_RE = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+")
+
+
+def normalize_domain(raw: str) -> str:
+    host = re.sub(r"^[a-z]+://", "", raw.strip().lower()).split("/")[0].split(":")[0].lstrip(".")
+    if host.startswith("www."):
+        host = host[4:]
+    if not _HOST_RE.fullmatch(host):
+        raise CookieError(f"'{raw.strip()}' is not a valid domain (example: vimeo.com).")
+    return host
+
+
+def parse_domains(raw: str) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(normalize_domain(part) for part in re.split(r"[,\s]+", raw or "") if part))
+
+
+def _domain_allowed(domain: str, allowed: tuple[str, ...] | None) -> bool:
+    if allowed is None:
+        return True
     host = domain.lstrip(".").lower()
-    return any(host == d or host.endswith("." + d) for d in config.COOKIE_DOMAINS)
+    return any(host == d or host.endswith("." + d) for d in allowed)
 
 
-def parse(text: str) -> tuple[list[Cookie], dict]:
+def parse(text: str, extra_domains: tuple[str, ...] = (), *, filter_domains: bool = True) -> tuple[list[Cookie], dict]:
     stats = {"lines": 0, "kept": 0, "skipped_domain": 0, "expired": 0, "invalid": 0}
     kept: dict[tuple, Cookie] = {}
     now = time.time()
+    allowed = (*config.COOKIE_DOMAINS, *extra_domains) if filter_domains else None
 
     for raw in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         line = raw.strip("﻿ \t")
@@ -100,7 +119,7 @@ def parse(text: str) -> tuple[list[Cookie], dict]:
             stats["invalid"] += 1
             continue
 
-        if not _domain_allowed(domain):
+        if not _domain_allowed(domain, allowed):
             stats["skipped_domain"] += 1
             continue
 
@@ -124,7 +143,7 @@ def _write_private(path: Path, content: str) -> None:
     os.replace(tmp, path)
 
 
-def save_upload(raw: bytes, slot: str | None = None) -> dict:
+def save_upload(raw: bytes, slot: str | None = None, extra_domains: tuple[str, ...] = ()) -> dict:
     if not raw or not raw.strip():
         raise CookieError("The file is empty.")
     if len(raw) > config.COOKIES_MAX_BYTES:
@@ -137,11 +156,11 @@ def save_upload(raw: bytes, slot: str | None = None) -> dict:
     except UnicodeDecodeError as exc:
         raise CookieError("The file is not valid UTF-8 text.") from exc
 
-    cookies, stats = parse(text)
+    cookies, stats = parse(text, extra_domains)
     if not cookies:
         hint = ""
         if stats["skipped_domain"]:
-            hint = f" {stats['skipped_domain']} cookie(s) were for sites that are not allowed (see COOKIE_DOMAINS)."
+            hint = f" {stats['skipped_domain']} cookie(s) were for sites that are not allowed; add the site under 'Other sites' or in COOKIE_DOMAINS."
         elif stats["lines"] == 0 or stats["invalid"] == stats["lines"]:
             hint = " The file does not look like Netscape cookies.txt (7 tab-separated columns per line)."
         raise CookieError("No usable cookies found." + hint)
@@ -167,7 +186,7 @@ def delete_slot(slot: str) -> bool:
 
 def _load_slot(path: Path) -> list[Cookie]:
     try:
-        return parse(path.read_text(encoding="utf-8"))[0]
+        return parse(path.read_text(encoding="utf-8"), filter_domains=False)[0]
     except OSError:
         return []
 
@@ -178,7 +197,6 @@ def _merged_path() -> Path:
 
 def _rebuild_merged() -> None:
     merged: dict[tuple, Cookie] = {}
-    # alphabetical order = deterministic precedence; later slots override earlier ones
     for path in sorted(cookies_dir().glob("*.txt")):
         for cookie in _load_slot(path):
             merged[cookie.key] = cookie

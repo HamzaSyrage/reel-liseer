@@ -154,3 +154,19 @@ def test_env_seed(tmp_path, monkeypatch):
     cookies.seed_from_env()
     assert (tmp_path / "s" / "env.txt").is_file()
     assert cookies.status()[0]["count"] == 3
+
+
+def test_extra_site_is_kept_and_survives_reload(env):
+    c, cookies, _, d = env
+    text = line(".vimeo.com", "vimeo_sess", "V") + "\n" + line(".other.example", "x", "Y")
+    r = c.post("/admin/api/cookies", headers=AUTH, data={"slot": "vimeo.com", "domains": "https://www.vimeo.com/foo", "text": text})
+    assert r.status_code == 200 and r.json()["kept"] == 1 and r.json()["skipped_domain"] == 1
+    assert cookies.status()[0]["domains"] == {"vimeo.com": 1}
+    with cookies.cookiefile() as path:
+        assert "vimeo_sess" in Path(path).read_text()
+
+
+def test_invalid_extra_domain(env):
+    c, *_ = env
+    r = c.post("/admin/api/cookies", headers=AUTH, data={"domains": "not a domain!", "text": line(".vimeo.com", "a")})
+    assert r.status_code == 422

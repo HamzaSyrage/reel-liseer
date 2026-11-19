@@ -115,6 +115,7 @@ def list_cookies():
 async def upload_cookies(
     slot: str = Form("universal"),
     text: str = Form(""),
+    domains: str = Form(""),
     file: Annotated[UploadFile | None, File()] = None,
 ):
     if file is not None and file.filename:
@@ -124,7 +125,8 @@ async def upload_cookies(
     else:
         raise HTTPException(status_code=400, detail="Choose a cookies.txt file or paste its contents.")
     try:
-        summary = await asyncio.to_thread(cookies.save_upload, raw, slot)
+        extra = cookies.parse_domains(domains)
+        summary = await asyncio.to_thread(cookies.save_upload, raw, slot, extra)
     except cookies.CookieError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _no_store(JSONResponse(summary))
@@ -163,25 +165,40 @@ PAGE_HTML = """<!doctype html>
 <meta name="robots" content="noindex,nofollow">
 <title>reel-liseer admin</title>
 <style>
-:root{color-scheme:light dark;--bg:#fafaf9;--fg:#1c1917;--mut:#78716c;--card:#fff;--bd:#e7e5e4;--ac:#2563eb;--bad:#b91c1c;--ok:#15803d}
-@media(prefers-color-scheme:dark){:root{--bg:#161412;--fg:#f5f5f4;--mut:#a8a29e;--card:#1f1d1b;--bd:#35312e;--ac:#60a5fa;--bad:#f87171;--ok:#4ade80}}
-*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
-main{max-width:720px;margin:0 auto;padding:28px 16px 64px}h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:0 0 10px}
-p.sub{color:var(--mut);margin:0 0 20px}.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px;margin-bottom:16px}
-label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}input,select,textarea,button{font:inherit;color:inherit}
-input[type=text],input[type=password],input[type=file],select,textarea{width:100%;padding:8px 10px;border:1px solid var(--bd);border-radius:6px;background:transparent}
-textarea{min-height:90px;font:12px/1.4 ui-monospace,monospace}
-button{padding:8px 14px;border:0;border-radius:6px;background:var(--ac);color:#fff;cursor:pointer;margin-top:12px}
-button.ghost{background:transparent;color:var(--bad);border:1px solid var(--bd);padding:4px 10px;margin:0}button:disabled{opacity:.5}
-.row{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--bd)}.row:first-child{border-top:0}
-small,.mut{color:var(--mut)}#msg{min-height:22px;margin:0 0 12px;font-size:14px}.ok{color:var(--ok)}.bad{color:var(--bad)}
-code{font:12px ui-monospace,monospace}.hidden{display:none}
+:root{color-scheme:light;--bg:#f6f5f3;--fg:#1c1917;--mut:#6b6560;--card:#fff;--field:#fff;--bd:#dedad6;--ac:#2563eb;--ac-fg:#fff;--bad:#b91c1c;--ok:#15803d}
+@media(prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#141211;--fg:#f3f1ee;--mut:#a39d97;--card:#1d1b19;--field:#262320;--bd:#37332f;--ac:#3b82f6;--ac-fg:#fff;--bad:#f87171;--ok:#4ade80}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:680px;margin:0 auto;padding:32px 16px 64px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:0 0 12px}
+p.sub{color:var(--mut);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:18px;margin-bottom:16px}
+label{display:block;font-size:13px;font-weight:500;color:var(--mut);margin:14px 0 6px}
+label:first-of-type{margin-top:0}
+input,select,textarea,button{font:inherit;color:inherit}
+input[type=text],input[type=password],select,textarea{width:100%;padding:9px 12px;border:1px solid var(--bd);border-radius:8px;background:var(--field);color:var(--fg)}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--ac);outline-offset:-1px;border-color:transparent}
+select{appearance:none;-webkit-appearance:none;padding-right:34px;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpath d='m1 1.5 5 5 5-5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+option{background:var(--field);color:var(--fg)}
+input[type=file]{width:100%;padding:6px;border:1px dashed var(--bd);border-radius:8px;background:var(--field);color:var(--mut)}
+input[type=file]::file-selector-button{margin-right:10px;padding:6px 12px;border:1px solid var(--bd);border-radius:6px;background:var(--card);color:var(--fg);cursor:pointer}
+textarea{min-height:96px;resize:vertical;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+button{padding:9px 16px;border:0;border-radius:8px;background:var(--ac);color:var(--ac-fg);font-weight:500;cursor:pointer;margin-top:16px}
+button:hover:not(:disabled){filter:brightness(1.1)}
+button:disabled{opacity:.5;cursor:default}
+button.ghost{background:transparent;color:var(--bad);border:1px solid var(--bd);padding:5px 12px;margin:0}
+.row{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 0;border-top:1px solid var(--bd)}
+.row:first-child{border-top:0;padding-top:0}
+small,.mut{color:var(--mut)}
+#meta{margin:12px 0 0;font-size:13px}
+#msg{min-height:22px;margin:0 0 12px;font-size:14px}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.hidden{display:none}
 </style></head><body><main>
 <h1>reel-liseer admin</h1><p class="sub">Server-wide cookies for yt-dlp. Nothing here is visible to bot users.</p>
 <p id="msg" role="status"></p>
 
 <section class="card" id="login"><h2>Admin login</h2>
-<label for="user">Username</label><input id="user" type="text" autocomplete="username" value="admin">
+<label for="user">Username</label><input id="user" type="text" autocomplete="username">
 <label for="token">Password</label><input id="token" type="password" autocomplete="current-password">
 <button id="unlock">Log in</button></section>
 
@@ -192,7 +209,9 @@ code{font:12px ui-monospace,monospace}.hidden{display:none}
 <section class="card"><h2>Upload cookies.txt</h2>
 <label for="slot">Label (use <b>universal</b> for a combined file, or one per site)</label>
 <select id="slot"><option>universal</option><option>youtube</option><option>instagram</option>
-<option>tiktok</option><option>facebook</option><option>twitter</option><option>reddit</option></select>
+<option>tiktok</option><option>facebook</option><option>twitter</option><option>reddit</option><option value="other">other site\u2026</option></select>
+<label for="extra" id="extralabel">Other sites to keep (optional, comma-separated, e.g. vimeo.com)</label>
+<input id="extra" type="text" placeholder="vimeo.com, dailymotion.com" autocomplete="off">
 <label for="file">Netscape-format cookies.txt</label><input id="file" type="file" accept=".txt,text/plain">
 <label for="text">...or paste the file contents</label><textarea id="paste" spellcheck="false"></textarea>
 <button id="upload">Upload</button>
@@ -226,11 +245,15 @@ async function enter(){try{await refresh();$('login').classList.add('hidden');$(
  $('app').classList.add('hidden');$('login').classList.remove('hidden');say(e.message,'bad')}}
 $('unlock').onclick=()=>{try{sessionStorage.setItem('t',b64($('user').value.trim()+':'+$('token').value))}catch(e){};$('token').value='';enter()};
 $('token').addEventListener('keydown',e=>{if(e.key==='Enter')$('unlock').click()});
-$('upload').onclick=async()=>{const f=new FormData();f.append('slot',$('slot').value);
+const syncExtra=()=>{const o=$('slot').value==='other';$('extralabel').textContent=o?'Site domain (e.g. vimeo.com)':'Other sites to keep (optional, comma-separated, e.g. vimeo.com)';$('extra').placeholder=o?'vimeo.com':'vimeo.com, dailymotion.com'};
+$('slot').onchange=syncExtra;
+$('upload').onclick=async()=>{const f=new FormData();const extra=$('extra').value.trim();
+ if($('slot').value==='other'&&!extra){say('Enter the site domain first.','bad');return}
+ f.append('slot',$('slot').value==='other'?extra.split(/[\\s,]+/)[0].replace(/^[a-z]+:\\/\\//i,'').replace(/^www\\./i,'').split('/')[0]:$('slot').value);f.append('domains',extra);
  if($('file').files[0])f.append('file',$('file').files[0]);else f.append('text',$('paste').value);
  $('upload').disabled=true;try{const r=await api('/cookies',{method:'POST',body:f});
   say('Saved '+r.kept+' cookies to "'+r.slot+'" ('+r.skipped_domain+' skipped: other sites, '+r.expired+' expired, '+r.invalid+' invalid lines).','ok');
-  $('file').value='';$('paste').value='';refresh()}catch(e){say(e.message,'bad')}$('upload').disabled=false};
+  $('file').value='';$('paste').value='';$('extra').value='';refresh()}catch(e){say(e.message,'bad')}$('upload').disabled=false};
 $('test').onclick=async()=>{$('test').disabled=true;say('Testing\\u2026');try{
  const r=await api('/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:$('url').value.trim()})});
  r.ok?say('Works: '+r.extractor+' \\u2014 "'+(r.title||'untitled')+'" ('+r.formats+' formats)','ok'):say('Failed: '+r.error,'bad')}
