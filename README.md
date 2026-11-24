@@ -102,11 +102,13 @@ and upload a cookies.txt (universal or per site). The page/API are disabled whil
 Full instructions, including persistence on Render: [COOKIES.md](COOKIES.md).
 
 ## Commands
-
-| Command           | Description                 |
-| ----------------- | --------------------------- |
-| `/start`          | Start the bot               |
-| `/ping`           | Check if the bot is running |
-| `/options <URL>`  | Choose the download format  |
-
-You can also send a video link directly.
+ 
+| Command | Description |
+| --- | --- |
+| `/start` | Start the bot |
+| `/ping` | Check the bot is running |
+| `/options <URL>` or `/o` | Pick the download format |
+| `/verbose <URL>` or `/v` | Send the video with a detailed caption (title, uploader, duration, resolution, size, link). Any error is reported with the step that failed |
+ 
+Send `/options` or `/verbose` without a link and the bot will wait for the link in your next message.
+You can also just send a supported link and the bot downloads it.

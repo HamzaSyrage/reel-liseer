@@ -13,29 +13,55 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Repl
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler
 
 from reel_liseer import config
-from reel_liseer.services.downloader import download, download_with_format, get_video_formats
+from reel_liseer.services.downloader import download, download_with_format, format_size, get_video_formats
 from reel_liseer.services.media import cleanup_downloads, make_thumbnail, probe as media_probe, to_telegram_safe
 
 URL_REGEX = r"^https?://(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{2,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*)$"
 URL_PATTERN = r'https?://[^\s<>"]+|www\.[^\s<>"]+'
+# Every pattern is matched right after "https://(www.)?" and must be a site yt-dlp can handle.
+SOCIAL_SITE_PATTERNS = [
+    # YouTube (also m. and music.)
+    r"(?:m\.|music\.)?youtube\.com/(?:watch/?\?|embed/|shorts/|live/|v/|playlist\?)",
+    r"youtu\.be/",
+    # Facebook / Instagram / TikTok / X
+    r"(?:m\.|web\.)?facebook\.com/(?:watch/?\?|reel/|reels/|share/v/|share/r/|[\w.-]+/videos/)",
+    r"instagram\.com/(?:[\w.]+/)?(?:p|reel|reels|tv|stories)/",
+    r"tiktok\.com/(?:@[\w.-]+/(?:video/)?|t/)",
+    r"(?:vm|vt)\.tiktok\.com/",
+    r"(?:mobile\.)?(?:twitter|x)\.com/[\w.-]+/status(?:es)?/",
+    # Reddit
+    r"reddit\.(?:com|it)/r/",
+    r"(?:[iv]\.)?redd\.it/",
+    r"(?:[\w-]+\.)?redditmedia\.com/",
+    r"(?:[\w-]+\.)?redditstatic\.com/",
+    # GIF hosts
+    r"media\.tenor\.(?:com|co)/",
+    r"(?:media|i)\.giphy\.com/",
+    r"i\.imgur\.com/",
+    r"imgur\.com/(?:a|gallery)/",
+    # Video platforms
+    r"(?:player\.)?vimeo\.com/",
+    r"dailymotion\.com/video/",
+    r"dai\.ly/",
+    r"twitch\.tv/(?:videos/|[\w-]+/clip/)",
+    r"clips\.twitch\.tv/",
+    r"kick\.com/[\w-]+/clips/",
+    r"streamable\.com/",
+    r"rumble\.com/",
+    r"odysee\.com/",
+    r"bilibili\.com/video/",
+    r"vk\.com/(?:video|clip)",
+    r"coub\.com/view/",
+    r"loom\.com/share/",
+    r"9gag\.com/gag/",
+    # Social / microblogs
+    r"bsky\.app/profile/[\w.:-]+/post/",
+    r"pinterest\.[a-z.]+/pin/",
+    r"(?:[\w-]+\.)?tumblr\.com/(?:post/|[\w-]+/\d)",
+    r"snapchat\.com/(?:spotlight|t)/",
+]
 SOCIAL_REGEX = (
-    r"https?://(?:www\.)?"
-    r"(?:"
-    r"youtube\.com/(?:watch/?\?|embed/|shorts/|live/|v/|playlist\?)"
-    r"|youtu\.be/"
-    r"|facebook\.com/(?:watch/?\?|reel/|reels/|share/v/|share/r/)"
-    r"|instagram\.com/(?:p|reel|reels|tv|stories)/"
-    r"|tiktok\.com/@[\w.-]+/(?:video/)?"
-    r"|(?:twitter|x)\.com/[\w.-]+/status(?:es)?/"
-    r"|reddit\.(?:com|it)/r/"
-    r"|(?:i\.)?redd\.it/"
-    r"|(?:[\w-]+\.)?redditmedia\.com/"
-    r"|(?:[\w-]+\.)?redditstatic\.com/"
-    r"|media\.tenor\.(?:com|co)/"
-    r"|(?:media|i)\.giphy\.com/"
-    r"|i\.imgur\.com/"
-    r")"
-    r"[\w./?=&%#:+~-]+"
+    r"https?://(?:www\.)?(?:" + "|".join(SOCIAL_SITE_PATTERNS) + r")[\w./?=&%#:+~@,;-]+"
 )
 
 LONGFORM_YOUTUBE_REGEX = (
@@ -72,6 +98,45 @@ def reply_parameters_for(message_id: int | None) -> ReplyParameters | None:
     if not message_id:
         return None
     return ReplyParameters(message_id=message_id, allow_sending_without_reply=True)
+
+CAPTION_MAX = 1024
+
+def format_duration(seconds) -> str:
+    seconds = int(seconds or 0)
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+def build_verbose_caption(media: dict, info, path: Path) -> str:
+    lines = []
+    if media.get('title'):
+        lines.append(f"Title: {media['title']}")
+    if media.get('uploader'):
+        lines.append(f"Uploader: {media['uploader']}")
+    if info.duration:
+        lines.append(f"Duration: {format_duration(info.duration)}")
+    if info.width and info.height:
+        lines.append(f"Resolution: {info.width}x{info.height}")
+    try:
+        lines.append(f"Size: {format_size(path.stat().st_size)}")
+    except OSError:
+        pass
+    if media.get('webpage_url'):
+        lines.append(f"Link: {media['webpage_url']}")
+    return "\n".join(lines)[:CAPTION_MAX] or None
+
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+TELEGRAM_TEXT_MAX = 4096
+
+def format_error_report(link: str, step: str, exc: BaseException) -> str:
+    detail = ANSI_RE.sub("", str(exc)).strip() or "(no message)"
+    report = (
+        "Error while processing your link\n"
+        f"Step: {step}\n"
+        f"Link: {link}\n"
+        f"{type(exc).__name__}: {detail}"
+    )
+    return report[:TELEGRAM_TEXT_MAX]
 
 def delete_after(message, seconds):
     async def delete_message():
@@ -119,19 +184,24 @@ async def deliver_media(
     media: dict,
     reply_to_message_id: int | None = None,
     message_thread_id: int | None = None,
+    verbose: bool = False,
 ):
     path = Path(media['path'])
     thumbnail = None
     transcode_to = None
     reply_parameters = reply_parameters_for(reply_to_message_id)
-
-    if not path.is_file() or path.stat().st_size == 0:  # noqa: ASYNC240
-        raise RuntimeError(f"downloaded file is missing or empty: {path}")
+    step = "checking downloaded file"
 
     try:
+        if not path.is_file() or path.stat().st_size == 0:  # noqa: ASYNC240
+            raise RuntimeError(f"downloaded file is missing or empty: {path}")
+
+        step = "reading media info"
         info = await asyncio.to_thread(media_probe, path, media)
 
         if info.is_animation():
+            caption = build_verbose_caption(media, info, path) if verbose else None
+            step = "uploading animation to Telegram"
             with open(path, "rb") as animation_file:  # noqa: ASYNC230
                 await bot.send_animation(
                     chat_id=chat_id,
@@ -141,20 +211,24 @@ async def deliver_media(
                     duration=info.duration,
                     width=info.width,
                     height=info.height,
+                    caption=caption,
                     message_thread_id=message_thread_id,
                     reply_parameters=reply_parameters,
                 )
             return
 
         if info.needs_transcode():
+            step = "converting video for Telegram (ffmpeg)"
             transcode_to = await asyncio.to_thread(to_telegram_safe, path)
             path = transcode_to
             info = await asyncio.to_thread(media_probe, path, {})
 
+        step = "creating thumbnail"
         thumbnail = await asyncio.to_thread(make_thumbnail, path)
 
-        # caption = (media.get('title') or '')[:1024] or None
+        caption = build_verbose_caption(media, info, path) if verbose else None
 
+        step = "uploading video to Telegram"
         with open(path, "rb") as video_file:  # noqa: ASYNC230
             await bot.send_video(
                 chat_id=chat_id,
@@ -164,10 +238,13 @@ async def deliver_media(
                 height=info.height,
                 thumbnail=str(thumbnail) if thumbnail else None,
                 supports_streaming=True,
-                # caption=caption,
+                caption=caption,
                 message_thread_id=message_thread_id,
                 reply_parameters=reply_parameters,
             )
+    except Exception as exc:
+        exc.failed_step = step
+        raise
     finally:
         if thumbnail:
             Path(thumbnail).unlink(missing_ok=True)  # noqa: ASYNC240
@@ -175,16 +252,31 @@ async def deliver_media(
             Path(transcode_to).unlink(missing_ok=True)  # noqa: ASYNC240
         Path(media['path']).unlink(missing_ok=True)  # noqa: ASYNC240
 
-async def send_downloaded_file(update: Update, context: ContextTypes.DEFAULT_TYPE, link: str):
+async def send_downloaded_file(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, link: str, verbose: bool = False
+):
     async with JOB_SEMAPHORE:
-        media = await asyncio.to_thread(download, link)
-        await deliver_media(
-            context.bot,
-            update.effective_chat.id,
-            media,
-            update.message.message_id,
-            update.message.message_thread_id,
-        )
+        step = "downloading"
+        try:
+            media = await asyncio.to_thread(download, link)
+            step = "sending"
+            await deliver_media(
+                context.bot,
+                update.effective_chat.id,
+                media,
+                update.message.message_id,
+                update.message.message_thread_id,
+                verbose=verbose,
+            )
+        except Exception as exc:
+            if not verbose:
+                raise
+            logger.exception("Error in verbose job for %s", link)
+            step = getattr(exc, "failed_step", step)
+            try:
+                await update.message.reply_text(format_error_report(link, step, exc))
+            except Exception:
+                logger.exception("Could not send verbose error report")
 
 async def show_format_options(update: Update, context: ContextTypes.DEFAULT_TYPE, link: str):
     try:
@@ -232,6 +324,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             # await update.message.reply_text("That doesn't look like a valid link on a supported platform.")
             return
 
+        if context.user_data.get('waiting_a_url_for_verbose'):
+            context.user_data['waiting_a_url_for_verbose'] = False
+
+            message_id = context.user_data.pop('waiting_message_id', None)
+
+            if message_id:
+                try:
+                    await context.bot.delete_message(
+                        chat_id=update.effective_chat.id,
+                        message_id=message_id,
+                    )
+                except Exception:
+                    logger.exception("Could not delete waiting message")
+
+            await send_downloaded_file(update, context, link, verbose=True)
+            return
+
         if context.user_data.get('waiting_a_url_for_options'):
             context.user_data['waiting_a_url_for_options'] = False
 
@@ -262,6 +371,7 @@ async def options_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         parts = update.message.text.split(" ")
         if len(parts) < 2:
             message = await update.message.reply_text("send me the link in the next message")
+            context.user_data['waiting_a_url_for_verbose'] = False
             context.user_data['waiting_a_url_for_options'] = True
             context.user_data['waiting_message_id'] = message.message_id
             return
@@ -276,6 +386,26 @@ async def options_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await show_format_options(update, context, link)
     except Exception:
         logger.exception("Error in options handler")
+
+async def verbose_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        parts = update.message.text.split()
+        if len(parts) < 2:
+            message = await update.message.reply_text("send me the link in the next message")
+            context.user_data['waiting_a_url_for_options'] = False
+            context.user_data['waiting_a_url_for_verbose'] = True
+            context.user_data['waiting_message_id'] = message.message_id
+            return
+
+        link = extract_link_from_message(update.message)
+        if not link or not is_accepted_social_link(link):
+            message = await update.message.reply_text("That doesn't look like a valid link on a supported platform.")
+            delete_after(message, 5)
+            return
+
+        await send_downloaded_file(update, context, link, verbose=True)
+    except Exception:
+        logger.exception("Error in verbose handler")
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -368,7 +498,8 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("start", start))
     # application.add_handler(CommandHandler("test", test_command))
     application.add_handler(CommandHandler("ping", ping_command))
-    application.add_handler(CommandHandler("options", options_command))
+    application.add_handler(CommandHandler(["options", "o"], options_command))
+    application.add_handler(CommandHandler(["verbose", "v"], verbose_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_error_handler(error_handler)
