@@ -9,7 +9,7 @@ import os
 import re
 
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ReplyParameters, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ReplyParameters, Update, BotCommand
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler
 
 from reel_liseer import config
@@ -475,6 +475,22 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.exception("Unhandled exception", exc_info=context.error)
 
+COMMANDS = [
+    BotCommand("start", "to start the bot"),
+    BotCommand("ping", "to ping the bot"),
+    BotCommand("options", "<URL> to chose the download format"),
+    # BotCommand("verbose", "<URL> to verbose the steps and errors"),
+]
+
+async def register_commands(application: Application) -> None:
+    try:
+        await application.bot.set_my_commands(COMMANDS)
+    except Exception:
+        logger.exception("Could not register bot commands")
+
+
+
+
 def build_application() -> Application:
     removed = cleanup_downloads()
     if removed:
@@ -487,7 +503,8 @@ def build_application() -> Application:
         connect_timeout=30,
         pool_timeout=30,
     )
-    builder = Application.builder().token(TOKEN).request(request)
+    builder = Application.builder().token(TOKEN).request(request).post_init(register_commands).build()
+    
     if config.TELEGRAM_API_BASE_URL:
         builder = (
             builder.base_url(f"{config.TELEGRAM_API_BASE_URL}/bot")
