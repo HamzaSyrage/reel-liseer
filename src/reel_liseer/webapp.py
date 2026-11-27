@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from telegram import Update
 
 from reel_liseer.admin import router as admin_router
-from reel_liseer.main import build_application
+from reel_liseer.main import build_application, register_commands
 from reel_liseer.services import cookies
 
 load_dotenv()
@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").rstrip("/")
 WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "telegram").strip().strip("/")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip() or None
 
 ptb_app = build_application()
 
@@ -27,12 +28,13 @@ async def lifespan(app: FastAPI):
     try:
         await ptb_app.initialize()
         await ptb_app.start()
+        await register_commands(ptb_app)
 
         if WEBHOOK_URL:
-            url = f"{WEBHOOK_URL}/{WEBHOOK_PATH}"
             await ptb_app.bot.set_webhook(
-                url=url,
+                url=f"{WEBHOOK_URL}/{WEBHOOK_PATH}",
                 allowed_updates=Update.ALL_TYPES,
+                secret_token=WEBHOOK_SECRET,
             )
 
         logger.info("Application started")
