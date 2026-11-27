@@ -503,7 +503,7 @@ def build_application() -> Application:
         connect_timeout=30,
         pool_timeout=30,
     )
-    builder = Application.builder().token(TOKEN).request(request).post_init(register_commands).build()
+    builder = Application.builder().token(TOKEN).request(request).post_init(register_commands)
     
     if config.TELEGRAM_API_BASE_URL:
         builder = (
