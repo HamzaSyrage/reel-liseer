@@ -3,7 +3,7 @@ import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from telegram import Update
 
 from reel_liseer.admin import router as admin_router
@@ -63,6 +63,8 @@ app.include_router(admin_router)
 
 @app.post(f"/{WEBHOOK_PATH}")
 async def telegram_webhook(request: Request):
+    if WEBHOOK_SECRET and request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
+        raise HTTPException(status_code=403)
     data = await request.json()
     update = Update.de_json(data, ptb_app.bot)
     await ptb_app.update_queue.put(update)
